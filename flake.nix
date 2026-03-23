@@ -38,6 +38,7 @@
               python-multipart
               aiofiles
               aiosqlite
+              uvicorn
             ]
           );
         in
