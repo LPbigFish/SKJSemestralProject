@@ -17,11 +17,7 @@
       ];
       perSystem =
         {
-          config,
-          self',
-          inputs',
           pkgs,
-          system,
           ...
         }:
         let
@@ -35,8 +31,13 @@
           python = python3.withPackages (
             p: with p; [
               fastapi
+              fastapi-cli
               pip
               pytest
+              sqlalchemy
+              python-multipart
+              aiofiles
+              aiosqlite
             ]
           );
         in

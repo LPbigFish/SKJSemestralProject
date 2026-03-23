@@ -1,2 +1,6 @@
 fastapi[standard]
 pytest
+sqlalchemy
+python-multipart
+aiofiles
+aiosqlite
