@@ -7,5 +7,5 @@
 
 ## AI SLOP
 
-- Model: Clude 4.3
+- Model: Claude 4.6
 - Využit pro `metadata.py`, `storage_service.py` a logiku ve `file_router`.
