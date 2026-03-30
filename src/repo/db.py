@@ -1,5 +1,5 @@
-from pytest import Session
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from repo import repo
 

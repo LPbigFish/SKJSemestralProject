@@ -22,10 +22,10 @@ Struktura záznamu v databázi:
 class FileRecord(Base):
     __tablename__ = "files"
 
-    id: Mapped[Uuid] = mapped_column(Uuid, primary_key=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     path: Mapped[str] = mapped_column(String, nullable=False)
     size: Mapped[int] = mapped_column(nullable=False)
     content_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[str] = mapped_column(String, nullable=False, default=datetime.datetime.now(tz=datetime.timezone.utc).isoformat())
+    created_at: Mapped[datetime.datetime] = mapped_column(String, nullable=False, default=datetime.datetime.now(tz=datetime.timezone.utc).isoformat())
