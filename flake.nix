@@ -35,6 +35,7 @@
               pip
               pytest
               sqlalchemy
+              pydantic
               python-multipart
               aiofiles
               aiosqlite
@@ -44,7 +45,7 @@
         in
         {
           devShells.default = pkgs.mkShell {
-            buildInputs = [ python ];
+            buildInputs = [ python pkgs.sqlite ];
           };
         };
     };
