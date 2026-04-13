@@ -6,3 +6,4 @@ aiofiles
 aiosqlite
 uvicorn
 pydantic
+alembic

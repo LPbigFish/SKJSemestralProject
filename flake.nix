@@ -40,12 +40,16 @@
               aiofiles
               aiosqlite
               uvicorn
+              alembic
             ]
           );
         in
         {
           devShells.default = pkgs.mkShell {
-            buildInputs = [ python pkgs.sqlite ];
+            buildInputs = [
+              python
+              pkgs.sqlite
+            ];
           };
         };
     };
