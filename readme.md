@@ -3,7 +3,7 @@
 ## Authors
 
 - Filip Štegner
-- Vojtěch Niedělský
+- Vojtěch Niedelský
 
 ## AI SLOP
 

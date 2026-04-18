@@ -5,20 +5,20 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from repo.db import get_db
-from repo.repo import FileRecord
+from src.repo.db import get_db
+from src.repo.repo import FileRecord
 
-from storage_service import (
+from src.storage_service import (
     generate_file_id,
     save_file,
     delete_file,
     file_exists,
     get_file_path,
 )
-from schemas.create_file import CreateFile
-from schemas.file_list_response import FileListResponse
-from schemas.delete_response import DeleteResponse
-from schemas.file_metadata import FileMetadata
+from src.schemas.create_file import CreateFile
+from src.schemas.file_list_response import FileListResponse
+from src.schemas.delete_response import DeleteResponse
+from src.schemas.file_metadata import FileMetadata
 
 files_router = APIRouter(prefix="/files")
 
@@ -96,7 +96,7 @@ def create_file(
     size = save_file(user_id, file_id, file)
 
     record = FileRecord(
-        file_id=file_id,
+        id=file_id,
         user_id=user_id,
         filename=file.filename or "unknown",
         path=str(get_file_path(user_id, file_id)),

@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from endpoints.files import files_router
+from src.endpoints.files import files_router
 import uvicorn
 
 app = FastAPI()
