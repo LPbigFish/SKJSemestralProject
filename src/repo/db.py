@@ -1,8 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from src.repo import repo
-
 engine = create_engine("sqlite:///./repo.db", echo=True)
 
 
