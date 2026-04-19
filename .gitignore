@@ -1,5 +1,14 @@
-/.direnv/
+.direnv/
+.envrc
 
-__pycache__
+__pycache__/
+*.pyc
+*.pyo
 
+*.db
 repo.db
+
+storage/
+
+.ruff_cache/
+.vscode/

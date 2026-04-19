@@ -49,6 +49,7 @@
             buildInputs = [
               python
               pkgs.sqlite
+              pkgs.pyright
             ];
           };
         };

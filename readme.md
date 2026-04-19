@@ -12,9 +12,4 @@
 
 - Model: Step 3.5 Flash (free)
 
-```
-Zadání pro validaci dat
-Pro všechny vstupy a výstupy, tedy parametry endpointů a návratové hodnoty z nich, používejte Pydantic modely.
-
-Nadefinujte si jednotlivé modely pro requesty i response a nepoužívejte jen obyčejné "raw" slovníky (dict) jako návratové hodnoty.
-```
+- Model: GLM-5.1

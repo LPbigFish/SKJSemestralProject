@@ -3,9 +3,8 @@ from sqlalchemy.orm import Session
 
 from src.repo import repo
 
-engine = create_engine("sqlite:///repo.db", echo=True)
+engine = create_engine("sqlite:///./repo.db", echo=True)
 
-repo.Base.metadata.create_all(bind=engine)
 
 def get_db():
     db = Session(bind=engine.connect())

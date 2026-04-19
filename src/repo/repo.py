@@ -1,24 +1,55 @@
 import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, create_engine, String, Uuid
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import (
+    Boolean,
+    String,
+    Uuid,
+    Integer,
+    ForeignKey,
+    DateTime,
+    text,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     pass
 
-"""
-Struktura záznamu v databázi:
-  "<file_id>": {
-    "id":           "uuid",
-    "user_id":      "string",
-    "filename":     "original_name.txt",
-    "path":         "storage/user_id/uuid",
-    "size":         1234,
-    "content_type": "text/plain",
-    "created_at":   "2025-03-23T10:00:00"
-  }
-"""
+
+def _utcnow():
+    return datetime.datetime.now(tz=datetime.timezone.utc)
+
+
+class Bucket(Base):
+    __tablename__ = "buckets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=_utcnow,
+    )
+
+    bandwidth_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    current_storage_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    ingress_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    egress_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    internal_transfer_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+
+    objects: Mapped[list["FileRecord"]] = relationship(back_populates="bucket")
+
+
 class FileRecord(Base):
     __tablename__ = "files"
 
@@ -28,4 +59,16 @@ class FileRecord(Base):
     path: Mapped[str] = mapped_column(String, nullable=False)
     size: Mapped[int] = mapped_column(nullable=False)
     content_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime.datetime] = mapped_column(String, nullable=False, default=datetime.datetime.now(tz=datetime.timezone.utc).isoformat())
+    created_at: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default=lambda: datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+    )
+    bucket_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("buckets.id"), nullable=False
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+
+    bucket: Mapped["Bucket"] = relationship(back_populates="objects")
