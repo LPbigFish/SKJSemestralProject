@@ -41,6 +41,8 @@
               aiosqlite
               uvicorn
               alembic
+              pytest-asyncio
+              msgpack
             ]
           );
         in

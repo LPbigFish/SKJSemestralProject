@@ -7,3 +7,5 @@ aiosqlite
 uvicorn
 pydantic
 alembic
+asyncio
+pytest-asyncio

@@ -5,8 +5,8 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from repo.db import get_db
-from repo.repo import FileRecord, Bucket
+from repository.db import get_db
+from repository.repo import FileRecord, Bucket
 
 from storage_service import (
     generate_file_id,

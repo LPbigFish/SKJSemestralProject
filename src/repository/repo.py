@@ -72,3 +72,4 @@ class FileRecord(Base):
     )
 
     bucket: Mapped["Bucket"] = relationship(back_populates="objects")
+    

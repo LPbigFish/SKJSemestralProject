@@ -1,15 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from repo.db import get_db
-from repo.repo import Bucket, FileRecord
+from repository.db import get_db
+from repository.repo import Bucket, FileRecord
 from schemas.bucket import BucketCreate, BucketResponse
 from schemas.bucket_object_list import BucketObjectListResponse
 from schemas.file_metadata import FileMetadata
 from schemas.billing import BillingResponse
 
 buckets_router = APIRouter(prefix="/buckets")
-
 
 @buckets_router.post("/", response_model=BucketResponse, status_code=201)
 def create_bucket(bucket_data: BucketCreate, db: Session = Depends(get_db)):
@@ -34,11 +33,8 @@ def list_bucket_objects(bucket_id: int, db: Session = Depends(get_db)):
     if not bucket:
         raise HTTPException(status_code=404, detail="Bucket nenalezen")
 
-    files = (
-        db.query(FileRecord)
-        .filter(FileRecord.bucket_id == bucket_id, FileRecord.is_deleted == False)
-        .all()
-    )
+    files = db.query(FileRecord).filter(FileRecord.bucket_id == bucket_id, FileRecord.is_deleted == False).all()
+    
     return BucketObjectListResponse(
         bucket_id=bucket_id,
         files=[
