@@ -21,7 +21,7 @@ bash migrate.sh
 ## Start the Server
 
 ```bash
-PYTHONPATH=src python -m uvicorn main:app --host 0.0.0.0 --port 8080
+PYTHONPATH=src python main.py
 ```
 
 ## Run Tests
@@ -36,18 +36,18 @@ PYTHONPATH=src pytest tests/ -v
 PYTHONPATH=src python benchmark.py --uri ws://localhost:8080/broker --subs 5 --pubs 5 --msgs 10000 --format both
 ```
 
-# Showcase
+## Showcase
 
 ## 1. Health Check
 
-```
+```sh
 $ curl http://localhost:8080/
 ["The API is RUNNING!!!"]
 ```
 
 ## 2. Create a Bucket
 
-```
+```sh
 $ curl -s -X POST http://localhost:8080/buckets/ \
   -H 'Content-Type: application/json' \
   -d '{"name": "my-bucket"}'
@@ -60,7 +60,7 @@ $ curl -s -X POST http://localhost:8080/buckets/ \
 
 ## 3. Upload a File
 
-```
+```sh
 $ echo "Hello from SKJ!" > testfile.txt
 $ curl -s -X POST http://localhost:8080/files/upload \
   -F "bucket_id=1" \
@@ -76,7 +76,7 @@ $ curl -s -X POST http://localhost:8080/files/upload \
 
 ## 4. List Files
 
-```
+```sh
 $ curl -s http://localhost:8080/files/ -H "X-User-Id: alice"
 {
     "files": [
@@ -94,7 +94,7 @@ $ curl -s http://localhost:8080/files/ -H "X-User-Id: alice"
 
 ## 5. Download a File
 
-```
+```sh
 $ curl http://localhost:8080/files/<file_id> -H "X-User-Id: alice"
 Hello from SKJ!
 ```
@@ -103,7 +103,7 @@ Hello from SKJ!
 
 Tracks bandwidth, ingress, egress, storage, and internal transfer bytes.
 
-```
+```sh
 $ curl -s http://localhost:8080/buckets/1/billing/
 {
     "bucket_id": 1,
@@ -118,7 +118,7 @@ $ curl -s http://localhost:8080/buckets/1/billing/
 
 ## 7. Delete a File (soft delete)
 
-```
+```sh
 $ curl -s -X DELETE http://localhost:8080/files/<file_id> -H "X-User-Id: alice"
 {
     "message": "Soubor úspěšně smazán (soft delete)",
@@ -130,7 +130,7 @@ $ curl -s -X DELETE http://localhost:8080/files/<file_id> -H "X-User-Id: alice"
 
 The default mode. Connects to the broker and opens a REPL where you can subscribe, publish, and ack.
 
-```
+```sh
 $ python mb_client.py --format json
 Connecting to ws://localhost:8080/broker (json)...
 Connected. Type 'help' for commands.
@@ -160,7 +160,7 @@ Bye.
 
 Input validation catches common mistakes:
 
-```
+```sh
 > pub missing_json
 [ERR] Usage: pub <topic> <json_payload>
 
@@ -180,7 +180,7 @@ Works with msgpack too: `python mb_client.py --format msgpack`
 
 Terminal 1 -- subscriber:
 
-```
+```sh
 $ python mb_client.py --mode sub --topic showcase --format json
 [SUB] Subscribed to 'showcase'
 [DELIVER] topic=showcase id=5015 payload={'temperature': 23.5}
@@ -190,7 +190,7 @@ $ python mb_client.py --mode sub --topic showcase --format json
 
 Terminal 2 -- publisher:
 
-```
+```sh
 $ python mb_client.py --mode pub --topic showcase --format json \
   --payload '{"temperature": 23.5}' --count 3
 [PUB] Sent 3 messages to 'showcase'
@@ -198,14 +198,14 @@ $ python mb_client.py --mode pub --topic showcase --format json \
 
 ## 10. Message Broker (MessagePack)
 
-```
+```sh
 $ python mb_client.py --mode sub --topic mp_showcase --format msgpack
 [SUB] Subscribed to 'mp_showcase'
 [DELIVER] topic=mp_showcase id=5018 payload={'sensor': 'CPU', 'value': 72}
 [DELIVER] topic=mp_showcase id=5019 payload={'sensor': 'CPU', 'value': 72}
 ```
 
-```
+```sh
 $ python mb_client.py --mode pub --topic mp_showcase --format msgpack \
   --payload '{"sensor": "CPU", "value": 72}' --count 2
 [PUB] Sent 2 messages to 'mp_showcase'
@@ -213,7 +213,7 @@ $ python mb_client.py --mode pub --topic mp_showcase --format msgpack \
 
 ## 11. Bucket Objects After Delete
 
-```
+```sh
 $ curl -s http://localhost:8080/buckets/1/objects/
 {
     "bucket_id": 1,
@@ -222,18 +222,18 @@ $ curl -s http://localhost:8080/buckets/1/objects/
 }
 ```
 
-# Client Modes
+## Client Modes
 
 | Mode | Command | Description |
-|------|---------|-------------|
+| ------ | --------- | ------------- |
 | Interactive | `python mb_client.py` | REPL: sub, pub, ack with input validation |
 | Subscriber | `python mb_client.py --mode sub --topic <t>` | Auto-subscribes and acks |
 | Publisher | `python mb_client.py --mode pub --topic <t> --payload '<json>'` | Sends N messages |
 
-# API Endpoints Summary
+## API Endpoints Summary
 
 | Method | Path | Description |
-|--------|------|-------------|
+| -------- | ------ | ------------- |
 | GET | `/` | Health check |
 | POST | `/buckets/` | Create bucket |
 | GET | `/buckets/{id}/objects/` | List files in bucket |

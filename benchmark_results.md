@@ -8,7 +8,7 @@
 - **Python:** 3.13.12
 - **Broker:** FastAPI
 - **Database:** SQLite (WAL mode)
-- **Date:** 2026-04-23
+- **Date:** 2026-04-26
 
 ## Test Parameters
 
@@ -22,19 +22,19 @@
 
 | Format     | Messages Received | Time (s)  | Throughput (msg/s)  |
 |------------|------------------:|----------:|--------------------:|
-| JSON       |             25000 |     16.32 |                1532 |
-| MessagePack|             25000 |     15.97 |                1566 |
+| JSON       |             25000 |     16.23 |                1540 |
+| MessagePack|             25000 |      8.10 |                3086 |
 
 ## Analysis
 
-MessagePack is faster (~2.2%) than JSON in this benchmark.
+MessagePack is faster (~2x) than JSON in this benchmark.
 
 ## How to Run
 
 ```bash
 # Terminal 1: Start the broker
-PYTHONPATH=src uvicorn main:app --host 0.0.0.0 --port 8080
+PYTHONPATH=src python main.py
 
 # Terminal 2: Run benchmark
-python benchmark.py --subs 5 --pubs 5 --msgs 1000 --format both
+PYTHONPATH=src python benchmark.py --subs 5 --pubs 5 --msgs 1000 --format both
 ```

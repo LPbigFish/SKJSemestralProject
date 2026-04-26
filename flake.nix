@@ -38,8 +38,6 @@
               sqlalchemy
               pydantic
               python-multipart
-              aiofiles
-              aiosqlite
               uvicorn
               alembic
               websockets

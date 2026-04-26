@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 engine = create_engine(
     "sqlite:///./repo.db",
-    echo=True,
+    echo=False,
     connect_args={"timeout": 30},
 )
 

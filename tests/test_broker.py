@@ -15,13 +15,15 @@ from sqlalchemy import select
 HOST = "127.0.0.1"
 PORT = 18765
 URI = f"ws://{HOST}:{PORT}/broker"
+WS_OPTS = {"max_queue": None, "compression": None, "ping_interval": None, "ping_timeout": None}
 
 
 def _run_server():
     import sys
     sys.path.insert(0, "src")
     from main import app
-    uvicorn.run(app, host=HOST, port=PORT, log_level="error")
+    uvicorn.run(app, host=HOST, port=PORT, log_level="error",
+                ws_ping_interval=None, ws_ping_timeout=None)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -34,18 +36,18 @@ def server():
 
 @pytest.mark.asyncio
 async def test_connect_and_disconnect():
-    async with websockets.connect(URI) as ws:
+    async with websockets.connect(URI, **WS_OPTS) as ws:
         pass
 
 
 @pytest.mark.asyncio
 async def test_message_delivered_to_subscribed_topic():
-    async with websockets.connect(URI) as sub:
+    async with websockets.connect(URI, **WS_OPTS) as sub:
         await sub.send(json.dumps({"action": "subscribe", "topic": "test_a"}))
         resp = json.loads(await sub.recv())
         assert resp["action"] == "subscribed"
 
-        async with websockets.connect(URI) as pub:
+        async with websockets.connect(URI, **WS_OPTS) as pub:
             await pub.send(
                 json.dumps(
                     {"action": "publish", "topic": "test_a", "payload": {"val": 1}}
@@ -60,11 +62,11 @@ async def test_message_delivered_to_subscribed_topic():
 
 @pytest.mark.asyncio
 async def test_message_not_delivered_to_other_topic():
-    async with websockets.connect(URI) as sub_x:
+    async with websockets.connect(URI, **WS_OPTS) as sub_x:
         await sub_x.send(json.dumps({"action": "subscribe", "topic": "topic_x"}))
         _ = json.loads(await sub_x.recv())
 
-        async with websockets.connect(URI) as pub:
+        async with websockets.connect(URI, **WS_OPTS) as pub:
             await pub.send(
                 json.dumps(
                     {"action": "publish", "topic": "topic_y", "payload": {"val": 99}}
@@ -81,11 +83,11 @@ async def test_message_not_delivered_to_other_topic():
 
 @pytest.mark.asyncio
 async def test_ack_marks_delivered():
-    async with websockets.connect(URI) as sub:
+    async with websockets.connect(URI, **WS_OPTS) as sub:
         await sub.send(json.dumps({"action": "subscribe", "topic": "ack_test"}))
         _ = json.loads(await sub.recv())
 
-        async with websockets.connect(URI) as pub:
+        async with websockets.connect(URI, **WS_OPTS) as pub:
             await pub.send(
                 json.dumps(
                     {"action": "publish", "topic": "ack_test", "payload": {"x": 1}}

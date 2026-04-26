@@ -14,7 +14,7 @@ alembic upgrade head
 
 ## Start the Server
 $env:PYTHONPATH="src"
-python -m uvicorn main:app --host 0.0.0.0 --port 8080
+python main.py
 
 ## Run Tests
 $env:PYTHONPATH="src"

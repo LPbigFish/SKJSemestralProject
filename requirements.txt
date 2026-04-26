@@ -1,10 +1,8 @@
 fastapi[standard]
 pytest
 pytest-asyncio
-sqlalchemy[asyncio]
+sqlalchemy
 python-multipart
-aiofiles
-aiosqlite
 uvicorn
 pydantic
 alembic
