@@ -1,11 +1,12 @@
 fastapi[standard]
 pytest
-sqlalchemy
+pytest-asyncio
+sqlalchemy[asyncio]
 python-multipart
 aiofiles
 aiosqlite
 uvicorn
 pydantic
 alembic
-asyncio
-pytest-asyncio
+websockets
+msgpack

@@ -50,6 +50,20 @@ class Bucket(Base):
     objects: Mapped[list["FileRecord"]] = relationship(back_populates="bucket")
 
 
+class QueuedMessage(Base):
+    __tablename__ = "queued_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    payload: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow
+    )
+    is_delivered: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+
+
 class FileRecord(Base):
     __tablename__ = "files"
 

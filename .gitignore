@@ -12,3 +12,6 @@ storage/
 
 .ruff_cache/
 .vscode/
+
+*.db-wal
+*.db-shm

@@ -34,6 +34,7 @@
               fastapi-cli
               pip
               pytest
+              pytest-asyncio
               sqlalchemy
               pydantic
               python-multipart
@@ -41,7 +42,7 @@
               aiosqlite
               uvicorn
               alembic
-              pytest-asyncio
+              websockets
               msgpack
             ]
           );

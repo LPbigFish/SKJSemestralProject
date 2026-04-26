@@ -13,3 +13,4 @@
 - Model: Step 3.5 Flash (free)
 
 - Model: GLM-5.1
+- Využit pro implementaci message brokeru (WebSocket endpoint, ConnectionManager, queues, klient, benchmark, testy).

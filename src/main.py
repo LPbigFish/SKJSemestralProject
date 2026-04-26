@@ -1,12 +1,14 @@
 from fastapi import FastAPI
 from endpoints.files import files_router
 from endpoints.buckets import buckets_router
+from endpoints.broker import broker_router
 import uvicorn
 
 app = FastAPI()
 
 app.include_router(files_router)
 app.include_router(buckets_router)
+app.include_router(broker_router)
 
 
 @app.get("/")
