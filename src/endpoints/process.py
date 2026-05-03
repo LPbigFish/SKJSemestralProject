@@ -65,7 +65,7 @@ async def process_object(
     payload = {
         "bucket_id": bucket_id,
         "file_id": file_id,
-        "user_id": user_id,
+        "user_id": record.user_id,
         "operation": body.operation,
         "params": body.params or {},
         "filename": record.filename,
