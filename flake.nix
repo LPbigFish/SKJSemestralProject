@@ -42,6 +42,9 @@
               alembic
               websockets
               msgpack
+              numpy
+              pillow
+              aiohttp
             ]
           );
         in

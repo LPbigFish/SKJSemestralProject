@@ -8,3 +8,6 @@ pydantic
 alembic
 websockets
 msgpack
+numpy
+Pillow
+aiohttp
