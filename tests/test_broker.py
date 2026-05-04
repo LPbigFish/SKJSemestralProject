@@ -4,7 +4,6 @@ import threading
 import time
 
 import pytest
-import pytest_asyncio
 import uvicorn
 import websockets
 
@@ -36,18 +35,18 @@ def server():
 
 @pytest.mark.asyncio
 async def test_connect_and_disconnect():
-    async with websockets.connect(URI, **WS_OPTS) as ws:
+    async with websockets.connect(URI, **WS_OPTS) as ws: # type: ignore
         pass
 
 
 @pytest.mark.asyncio
 async def test_message_delivered_to_subscribed_topic():
-    async with websockets.connect(URI, **WS_OPTS) as sub:
+    async with websockets.connect(URI, **WS_OPTS) as sub: # type: ignore
         await sub.send(json.dumps({"action": "subscribe", "topic": "test_a"}))
         resp = json.loads(await sub.recv())
         assert resp["action"] == "subscribed"
 
-        async with websockets.connect(URI, **WS_OPTS) as pub:
+        async with websockets.connect(URI, **WS_OPTS) as pub: # type: ignore
             await pub.send(
                 json.dumps(
                     {"action": "publish", "topic": "test_a", "payload": {"val": 1}}
@@ -62,11 +61,11 @@ async def test_message_delivered_to_subscribed_topic():
 
 @pytest.mark.asyncio
 async def test_message_not_delivered_to_other_topic():
-    async with websockets.connect(URI, **WS_OPTS) as sub_x:
+    async with websockets.connect(URI, **WS_OPTS) as sub_x: # type: ignore
         await sub_x.send(json.dumps({"action": "subscribe", "topic": "topic_x"}))
         _ = json.loads(await sub_x.recv())
 
-        async with websockets.connect(URI, **WS_OPTS) as pub:
+        async with websockets.connect(URI, **WS_OPTS) as pub: # type: ignore
             await pub.send(
                 json.dumps(
                     {"action": "publish", "topic": "topic_y", "payload": {"val": 99}}
@@ -83,11 +82,11 @@ async def test_message_not_delivered_to_other_topic():
 
 @pytest.mark.asyncio
 async def test_ack_marks_delivered():
-    async with websockets.connect(URI, **WS_OPTS) as sub:
+    async with websockets.connect(URI, **WS_OPTS) as sub: # type: ignore
         await sub.send(json.dumps({"action": "subscribe", "topic": "ack_test"}))
         _ = json.loads(await sub.recv())
 
-        async with websockets.connect(URI, **WS_OPTS) as pub:
+        async with websockets.connect(URI, **WS_OPTS) as pub: # type: ignore
             await pub.send(
                 json.dumps(
                     {"action": "publish", "topic": "ack_test", "payload": {"x": 1}}

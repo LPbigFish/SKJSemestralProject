@@ -85,4 +85,30 @@ class FileRecord(Base):
     )
 
     bucket: Mapped["Bucket"] = relationship(back_populates="objects")
+
+
+class ProcessingJob(Base):
+    __tablename__ = "processing_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    original_file_id: Mapped[str] = mapped_column(
+        String, ForeignKey("files.id"), nullable=False, index=True
+    )
+    bucket_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("buckets.id"), nullable=False
+    )
+    operation: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="processing", server_default="processing"
+    )
+    result_file_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("files.id"), nullable=True
+    )
+    error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
     

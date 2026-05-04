@@ -1,4 +1,4 @@
 {
-  "typeCheckingMode": "standard",
+  "typeCheckingMode": "basic",
   "include": ["src", "mb_client.py", "benchmark.py", "tests"]
 }

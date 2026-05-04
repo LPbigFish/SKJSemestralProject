@@ -72,6 +72,27 @@ def process_image(image_bytes: bytes, operation: str, params: dict | None) -> by
     return buf.getvalue()
 
 
+async def update_job_status(
+    session: aiohttp.ClientSession,
+    gateway_url: str,
+    job_id: int,
+    status: str,
+    result_file_id: str | None = None,
+    error: str | None = None,
+):
+    url = f"{gateway_url}/buckets/internal/jobs/{job_id}"
+    headers = {"X-Internal-Source": "true"}
+    body = {"status": status}
+    if result_file_id is not None:
+        body["result_file_id"] = result_file_id
+    if error is not None:
+        body["error"] = error
+    async with session.put(url, headers=headers, json=body) as resp:
+        if resp.status != 200:
+            body_text = await resp.text()
+            log.error("Failed to update job %d: HTTP %d %s", job_id, resp.status, body_text)
+
+
 async def publish_done(ws, payload: dict):
     await ws.send(json.dumps({"action": "publish", "topic": "image.done", "payload": payload}))
     log.info("Published to image.done: %s", payload.get("status"))
@@ -89,6 +110,7 @@ async def handle_job(
     user_id = payload.get("user_id", "default_user")
     operation = payload.get("operation", "")
     params = payload.get("params")
+    job_id = payload.get("job_id")
 
     try:
         log.info(
@@ -107,21 +129,34 @@ async def handle_job(
             session, gateway_url, bucket_id, user_id, new_name, result_bytes
         )
 
+        new_file_id = upload_result["id"]
+
+        if job_id:
+            await update_job_status(
+                session, gateway_url, job_id, "completed", result_file_id=new_file_id
+            )
+
         await publish_done(
             ws,
             {
                 "status": "completed",
                 "original_file_id": file_id,
-                "new_file_id": upload_result["id"],
+                "new_file_id": new_file_id,
                 "operation": operation,
                 "bucket_id": bucket_id,
             },
         )
 
-        log.info("Job msg_id=%d completed -> new_file_id=%s", message_id, upload_result["id"])
+        log.info("Job msg_id=%d completed -> new_file_id=%s", message_id, new_file_id)
 
     except Exception as exc:
         log.error("Job msg_id=%d failed: %s", message_id, exc)
+
+        if job_id:
+            await update_job_status(
+                session, gateway_url, job_id, "failed", error=str(exc)
+            )
+
         await publish_done(
             ws,
             {
