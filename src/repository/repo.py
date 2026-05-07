@@ -11,6 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+
 class Base(DeclarativeBase):
     pass
 
@@ -25,11 +26,8 @@ class Bucket(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        default=_utcnow,
+        DateTime, nullable=False, default=_utcnow
     )
-
     bandwidth_bytes: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
@@ -45,7 +43,6 @@ class Bucket(Base):
     internal_transfer_bytes: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
-
     objects: Mapped[list["FileRecord"]] = relationship(back_populates="bucket")
 
 
@@ -84,6 +81,18 @@ class FileRecord(Base):
         Boolean, nullable=False, default=False, server_default=text("0")
     )
 
+    # ── Haystack lokace ──────────────────────────────────────────────────────
+    # status: "ready"     – soubor je dostupný (buď na lokálním disku nebo v Haystack)
+    #         "uploading" – čeká na potvrzení od Haystack Node (ACK)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="ready", server_default="ready"
+    )
+    # Pokud je status "ready" a volume_id is not None → soubor je v Haystack
+    # Pokud je status "ready" a volume_id is None    → soubor je na lokálním disku (path)
+    volume_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    haystack_offset: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    haystack_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     bucket: Mapped["Bucket"] = relationship(back_populates="objects")
 
 
@@ -111,4 +120,3 @@ class ProcessingJob(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
-    
