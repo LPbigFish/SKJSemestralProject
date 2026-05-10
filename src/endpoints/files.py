@@ -41,9 +41,12 @@ log = logging.getLogger(__name__)
 
 files_router = APIRouter(prefix="/files")
 
-# URL Haystack Node – v produkci nastavit přes env proměnnou / config
-HAYSTACK_URL = "http://localhost:8081"
-BROKER_URI = "ws://localhost:8080/broker"
+import os
+
+# URL Haystack Node a Broker – konfigurovatelné přes env proměnné
+# (testy přepisují tyto hodnoty přímo na modulu před spuštěním serveru)
+HAYSTACK_URL: str = os.environ.get("HAYSTACK_URL", "http://localhost:8081")
+BROKER_URI: str = os.environ.get("BROKER_URI", "ws://localhost:8080/broker")
 
 
 # ── Pozadí: ACK listener ──────────────────────────────────────────────────────
@@ -56,13 +59,15 @@ async def storage_ack_listener():
       3. Zaúčtuje billing (storage bytes)
     Spouštět jako asyncio.create_task() při startu aplikace.
     """
+    import endpoints.files as _self  # dynamické čtení BROKER_URI při každém reconnectu
     reconnect_delay = 2
 
     while True:
         try:
-            log.info("ACK listener: připojuji se k brokeru")
+            current_broker_uri = _self.BROKER_URI
+            log.info("ACK listener: připojuji se k brokeru %s", current_broker_uri)
             async with websockets.connect(
-                BROKER_URI,
+                current_broker_uri,
                 max_queue=None,
                 compression=None,
                 ping_interval=None,
@@ -206,7 +211,8 @@ async def get_specific_file(
 
     # ── Haystack čtení ────────────────────────────────────────────────────────
     if record.volume_id is not None:
-        url = f"{HAYSTACK_URL}/volume/{record.volume_id}/{record.haystack_offset}/{record.haystack_size}"
+        import endpoints.files as _self
+        url = f"{_self.HAYSTACK_URL}/volume/{record.volume_id}/{record.haystack_offset}/{record.haystack_size}"
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.get(url, timeout=30.0)

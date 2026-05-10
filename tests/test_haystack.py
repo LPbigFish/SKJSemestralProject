@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 import httpx
 import msgpack
@@ -51,14 +52,23 @@ _TEST_VOLUME_DIR: Path = Path(tempfile.mkdtemp(prefix="haystack_test_"))
 
 def _run_haystack_server():
     import sys
-    sys.path.insert(0, ".")
+    # Přidáme složku src/haystack (tam kde leží haystack_node.py) do sys.path
+    haystack_path = str(Path(__file__).resolve().parent.parent / "src" / "haystack")
+    if haystack_path not in sys.path:
+        sys.path.insert(0, haystack_path)
 
-    # Nastavíme globální proměnné před importem aplikace
-    import haystack_node as hn
-    hn.VOLUME_DIR = _TEST_VOLUME_DIR
-    hn.MAX_VOLUME_BYTES = 1 * 1024 * 1024  # 1 MB – malý limit pro test rotace
+    import haystack_node as hn  # type: ignore[import-unresolved]
+
+    # Nastavíme globální proměnné PŘÍMO na modulu – musí být před uvicorn.run
+    # protože startup event čte tyto hodnoty při inicializaci
     hn.BROKER_URI = BROKER_URI
     hn.GATEWAY_URL = GATEWAY_URL
+    hn.VOLUME_DIR = _TEST_VOLUME_DIR
+    hn.MAX_VOLUME_BYTES = 1 * 1024 * 1024  # 1 MB – malý limit pro test rotace
+
+    # Také resetujeme stav svazků aby testy byly izolované
+    hn._current_volume_id = 1
+    hn._current_file = None
 
     uvicorn.run(
         hn.app,
@@ -70,7 +80,18 @@ def _run_haystack_server():
 
 def _run_gateway_server():
     import sys
-    sys.path.insert(0, ".")
+    project_root = str(Path(__file__).resolve().parent.parent)
+    src_path = str(Path(__file__).resolve().parent.parent / "src")
+    for p in [src_path, project_root]:
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    # Nastavíme BROKER_URI na modulu files PŘED spuštěním serveru,
+    # aby storage_ack_listener použil testovací broker místo localhost:8080
+    from endpoints import files as files_module
+    files_module.BROKER_URI = BROKER_URI
+    files_module.HAYSTACK_URL = HAYSTACK_URL
+
     from main import app
     uvicorn.run(
         app,
@@ -101,7 +122,7 @@ def servers():
 
 # ── Pomocné funkce ────────────────────────────────────────────────────────────
 
-async def _create_bucket(name: str = None) -> int:
+async def _create_bucket(name: Optional[str] = None) -> int:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{GATEWAY_URL}/buckets/",
@@ -157,7 +178,7 @@ async def test_write_and_read_single_needle():
     """Přímý zápis přes broker a čtení přes HTTP endpoint."""
     data = b"Hello, Haystack! " * 100  # 1700 bajtů
 
-    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:
+    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:  # type: ignore[call-overload]
         # Subscribujeme na storage.ack abychom dostali offset/size
         sub_msg: bytes = msgpack.packb(  # type: ignore[assignment]
             {"action": "subscribe", "topic": "storage.ack"}
@@ -226,7 +247,7 @@ async def test_multiple_needles_correct_offsets():
     ]
     acks = []
 
-    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:
+    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:  # type: ignore[call-overload]
         sub_msg: bytes = msgpack.packb(  # type: ignore[assignment]
             {"action": "subscribe", "topic": "storage.ack"}
         )
@@ -235,8 +256,11 @@ async def test_multiple_needles_correct_offsets():
         msg = msgpack.unpackb(raw, raw=False) if isinstance(raw, bytes) else json.loads(raw)
         assert msg.get("action") == "subscribed"
 
+        # Mapujeme object_id → původní data, abychom mohli správně párovat ACK
+        object_ids = []
         for i, data in enumerate(payloads):
             object_id = f"multi-needle-{i}-{int(time.time() * 1000)}"
+            object_ids.append(object_id)
             pub_msg: bytes = msgpack.packb(  # type: ignore[assignment]
                 {
                     "action": "publish",
@@ -246,12 +270,17 @@ async def test_multiple_needles_correct_offsets():
             )
             await ws.send(pub_msg)
 
-        # Sesbíráme všechny ACK
+        payload_map = dict(zip(object_ids, payloads))
+        our_ids = set(object_ids)
+
+        # Sesbíráme ACK pouze pro naše object_ids (filtrujeme zprávy z jiných testů)
         for _ in range(len(payloads)):
             for _ in range(20):
                 raw = await asyncio.wait_for(ws.recv(), timeout=3.0)
                 msg = msgpack.unpackb(raw, raw=False) if isinstance(raw, bytes) else json.loads(raw)
-                if msg.get("action") == "deliver" and msg.get("topic") == "storage.ack":
+                if (msg.get("action") == "deliver"
+                        and msg.get("topic") == "storage.ack"
+                        and msg.get("payload", {}).get("object_id") in our_ids):
                     acks.append(msg["payload"])
                     break
 
@@ -261,14 +290,17 @@ async def test_multiple_needles_correct_offsets():
     offsets = [a["offset"] for a in acks]
     assert len(set(offsets)) == len(offsets), f"Duplicitní offsety: {offsets}"
 
-    # Ověříme, že data jsou na správných místech
-    for ack, original_data in zip(sorted(acks, key=lambda a: a["offset"]), payloads):
+    # Ověříme data podle object_id – správné párování bez závislosti na pořadí
+    for ack in acks:
+        original_data = payload_map[ack["object_id"]]
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{HAYSTACK_URL}/volume/{ack['volume_id']}/{ack['offset']}/{ack['size']}"
             )
         assert resp.status_code == 200
-        assert resp.content == original_data
+        assert resp.content == original_data, (
+            f"Data na offset {ack['offset']} nesedí pro object_id {ack['object_id']}"
+        )
 
 
 @pytest.mark.asyncio
@@ -286,7 +318,7 @@ async def test_volume_rotation():
     big_data = os.urandom(600 * 1024)   # 600 KB
     big_data_2 = os.urandom(600 * 1024)  # dalších 600 KB → celkem >1 MB → rotace
 
-    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:
+    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:  # type: ignore[call-overload]
         sub_msg: bytes = msgpack.packb(  # type: ignore[assignment]
             {"action": "subscribe", "topic": "storage.ack"}
         )
@@ -449,7 +481,7 @@ async def test_invalid_message_does_not_crash_node():
     Neplatná zpráva (chybí object_id) nesmí shodit Haystack Node.
     Node musí zůstat funkční pro další požadavky.
     """
-    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:
+    async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:  # type: ignore[call-overload]
         bad_msg: bytes = msgpack.packb(  # type: ignore[assignment]
             {
                 "action": "publish",

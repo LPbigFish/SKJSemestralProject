@@ -11,3 +11,4 @@ msgpack
 numpy
 Pillow
 aiohttp
+httpx
