@@ -6,7 +6,7 @@ Samostatná FastAPI aplikace. Spouštěj příkazem:
     python haystack_node.py
     # nebo
     python haystack_node.py --host 0.0.0.0 --port 8081 \
-        --broker-uri ws://localhost:8080/broker \
+        --broker-uri ws://localhost:8082/broker \
         --volume-dir ./haystack_volumes \
         --max-volume-size 104857600
 
@@ -22,6 +22,8 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+from contextlib import asynccontextmanager
 from io import BufferedRandom
 from pathlib import Path
 from typing import Optional
@@ -40,7 +42,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Konfigurace (lze přepsat CLI argumenty) ──────────────────────────────────
-BROKER_URI: str = "ws://localhost:8080/broker"
+BROKER_URI: str = "ws://localhost:8082/broker"
 GATEWAY_URL: str = "http://localhost:8080"
 VOLUME_DIR: Path = Path("haystack_volumes")
 MAX_VOLUME_BYTES: int = 100 * 1024 * 1024  # 100 MB
@@ -79,7 +81,7 @@ def _open_volume(volume_id: int):
     path.parent.mkdir(parents=True, exist_ok=True)
     # "ab+" = append binary + readable; tell() vrací konec souboru
     f = open(path, "ab+")  # noqa: WPS515
-    log.info("Otevřen svazek %s (velikost: %d B)", path, f.seek(0, 2) or f.tell())
+    log.info("Otevřen svazek %s (velikost: %d B)", path, f.seek(0, 2))
     return f
 
 
@@ -204,8 +206,6 @@ async def _handle_write_message(ws, message_id: int, payload: dict):
 
     if not object_id or raw_data is None:
         log.error("Neplatná zpráva (chybí object_id nebo data), msg_id=%s", message_id)
-        # ACK stejně odešleme, aby se zpráva neblokovala v brokeru
-        await _send_msgpack(ws, {"action": "ack", "message_id": message_id})
         return
 
     # msgpack může binární data deserializovat jako bytes nebo bytearray
@@ -215,14 +215,12 @@ async def _handle_write_message(ws, message_id: int, payload: dict):
         data = bytes(raw_data)
     else:
         log.error("Neočekávaný typ dat: %s, msg_id=%s", type(raw_data), message_id)
-        await _send_msgpack(ws, {"action": "ack", "message_id": message_id})
         return
 
     try:
         ack = await write_needle(object_id, data)
     except Exception as e:
         log.error("Zápis selhal pro object_id=%s: %s", object_id, e)
-        await _send_msgpack(ws, {"action": "ack", "message_id": message_id})
         return
 
     # Odeslat ACK brokeru (potvrdit doručení zprávy)
@@ -248,26 +246,20 @@ async def _send_msgpack(ws, data: dict):
 
 # ── FastAPI aplikace ──────────────────────────────────────────────────────────
 
-app = FastAPI(title="Haystack Storage Node")
-
-
-@app.on_event("startup")
-async def startup():
-    """Inicializace svazků a spuštění broker listeneru na pozadí."""
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
     global _current_volume_id, _current_file
     _current_volume_id = _detect_last_volume()
     _current_file = _open_volume(_current_volume_id)
     asyncio.create_task(broker_listener())
     log.info("Haystack Node spuštěn, aktivní svazek: volume_%d.dat", _current_volume_id)
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Bezpečné uzavření aktivního svazku."""
-    global _current_file
+    yield
     if _current_file:
         _current_file.close()
         log.info("Aktivní svazek uzavřen")
+
+
+app = FastAPI(title="Haystack Storage Node", lifespan=_lifespan)
 
 
 @app.get("/volume/{volume_id}/{offset}/{size}")
@@ -350,9 +342,11 @@ async def compact_volume(volume_id: int, gateway_url: Optional[str] = None):
     dst_path = VOLUME_DIR / f"volume_{volume_id}_compacted.dat"
 
     # 1. Získáme seznam nesmazaných objektů z S3 Gateway pro tento svazek
+    _INTERNAL_HEADERS = {"X-Internal-Source": "true"}
+
     async with aiohttp.ClientSession() as session:
         url = f"{gw_url}/files/internal/volume/{volume_id}/objects"
-        async with session.get(url) as resp:
+        async with session.get(url, headers=_INTERNAL_HEADERS) as resp:
             if resp.status != 200:
                 body = await resp.text()
                 raise HTTPException(
@@ -399,7 +393,7 @@ async def compact_volume(volume_id: int, gateway_url: Optional[str] = None):
     # 3. Odešleme na Gateway aktualizované offsety
     async with aiohttp.ClientSession() as session:
         url = f"{gw_url}/files/internal/bulk-update-location"
-        async with session.post(url, json={"updates": updates}) as resp:
+        async with session.post(url, json={"updates": updates}, headers=_INTERNAL_HEADERS) as resp:
             if resp.status != 200:
                 body = await resp.text()
                 # Kompaktovaný soubor smažeme – offsety nejsou aktualizované
@@ -409,9 +403,8 @@ async def compact_volume(volume_id: int, gateway_url: Optional[str] = None):
                     detail=f"Gateway odmítla aktualizaci offsetů: HTTP {resp.status} {body}",
                 )
 
-    # 4. Nahradíme starý soubor kompaktovaným
-    src_path.unlink()
-    dst_path.rename(src_path)
+    # 4. Nahradíme starý soubor kompaktovaným (atomická operace)
+    os.replace(str(dst_path), str(src_path))
     log.info(
         "Kompakce svazku %d dokončena. Přesunuto %d objektů, ušetřeno ~%d B",
         volume_id,
@@ -434,7 +427,7 @@ def main():
     parser = argparse.ArgumentParser(description="Haystack Storage Node")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8081)
-    parser.add_argument("--broker-uri", default="ws://localhost:8080/broker")
+    parser.add_argument("--broker-uri", default="ws://localhost:8082/broker")
     parser.add_argument("--gateway-url", default="http://localhost:8080")
     parser.add_argument("--volume-dir", default="haystack_volumes")
     parser.add_argument(

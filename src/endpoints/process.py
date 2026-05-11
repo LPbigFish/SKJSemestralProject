@@ -1,14 +1,12 @@
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from endpoints.broker import _store_message_sync, manager
+from broker_client import publish_to_broker
 from repository.db import get_db
 from repository.repo import Bucket, FileRecord, ProcessingJob
-from schemas.broker import DeliverMessage
 
 process_router = APIRouter(prefix="/buckets")
 
@@ -118,12 +116,7 @@ async def process_object(
     payload["job_id"] = job_id
     db.commit()
 
-    msg_id = await run_in_threadpool(_store_message_sync, "image.jobs", payload)
-
-    deliver = DeliverMessage(
-        topic="image.jobs", message_id=msg_id, payload=payload
-    )
-    await manager.broadcast(deliver.model_dump(), "image.jobs")
+    await publish_to_broker("image.jobs", payload)
 
     return ProcessResponse(status="processing_started")
 

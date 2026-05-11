@@ -45,6 +45,7 @@
               numpy
               pillow
               aiohttp
+              httpx
             ]
           );
         in

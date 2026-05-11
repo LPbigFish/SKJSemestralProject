@@ -50,7 +50,7 @@ async def upload_image(
     form.add_field("bucket_id", str(bucket_id))
     form.add_field("file", data, filename=filename, content_type="image/png")
     async with session.post(url, headers=headers, data=form) as resp:
-        if resp.status != 201:
+        if resp.status not in (200, 201, 202):
             body = await resp.text()
             raise RuntimeError(
                 f"Failed to upload processed image: HTTP {resp.status} {body}"
@@ -209,7 +209,7 @@ def main():
     parser = argparse.ArgumentParser(description="Image Processing Worker")
     parser.add_argument(
         "--broker-uri",
-        default="ws://localhost:8080/broker",
+        default="ws://localhost:8082/broker",
         help="WebSocket broker URI",
     )
     parser.add_argument(

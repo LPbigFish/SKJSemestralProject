@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 engine = create_engine(
-    "sqlite:///./repo.db",
+    "sqlite:///./broker.db",
     echo=False,
     connect_args={"timeout": 30},
 )
@@ -18,7 +18,12 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.close()
 
 
-def get_db():
+def init_db():
+    from broker.models import Base
+    Base.metadata.create_all(engine)
+
+
+def get_session():
     db = Session(bind=engine.connect())
     try:
         yield db

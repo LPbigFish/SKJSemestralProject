@@ -1,22 +1,22 @@
 """
 endpoints/files.py
 ==================
-S3 Gateway – správa souborů.
+S3 Gateway - sprava souboru.
 
-Změny oproti původní verzi:
-  - POST /files/upload         → Haystack async upload (202 Accepted)
-  - GET  /files/{file_id}      → čtení přes Haystack Node (pokud volume_id je nastaveno)
-  - DELETE /files/{file_id}    → soft delete (beze změny)
-  - GET  /files/internal/volume/{volume_id}/objects  → pro compact.py
-  - POST /files/internal/bulk-update-location        → pro compact.py
-  
-Na pozadí (spuštěno při startu aplikace v main.py) běží storage_ack_listener(),
-který naslouchá na storage.ack a aktualizuje DB záznamy.
+  - POST /files/upload         -> Haystack async upload (202 Accepted)
+  - GET  /files/{file_id}      -> cteni pres Haystack Node (pokud volume_id je nastaveno)
+  - DELETE /files/{file_id}    -> soft delete
+  - GET  /files/internal/volume/{volume_id}/objects  -> pro compact.py
+  - POST /files/internal/bulk-update-location        -> pro compact.py
+
+Na pozadi bezi storage_ack_listener(), ktery nasloucha na storage.ack
+a aktualizuje DB zaznamy.
 """
 
 import asyncio
 import json
 import logging
+import os
 from typing import Optional
 
 import httpx
@@ -27,10 +27,9 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from endpoints.broker import _store_message_sync, manager
+from broker_client import publish_to_broker
 from repository.db import get_db, get_sync_session
 from repository.repo import Bucket, FileRecord
-from schemas.broker import DeliverMessage
 from schemas.create_file import CreateFile
 from schemas.delete_response import DeleteResponse
 from schemas.file_list_response import FileListResponse
@@ -41,31 +40,27 @@ log = logging.getLogger(__name__)
 
 files_router = APIRouter(prefix="/files")
 
-import os
-
-# URL Haystack Node a Broker – konfigurovatelné přes env proměnné
-# (testy přepisují tyto hodnoty přímo na modulu před spuštěním serveru)
 HAYSTACK_URL: str = os.environ.get("HAYSTACK_URL", "http://localhost:8081")
-BROKER_URI: str = os.environ.get("BROKER_URI", "ws://localhost:8080/broker")
+BROKER_URI: str = os.environ.get("BROKER_URI", "ws://localhost:8082/broker")
 
 
-# ── Pozadí: ACK listener ──────────────────────────────────────────────────────
+# -- Pozadi: ACK listener ---------------------------------------------------
 
 async def storage_ack_listener():
     """
-    Naslouchá na storage.ack a po obdržení potvrzení od Haystack Node:
+    Nasloucha na storage.ack a po obdrzeni potvrzeni od Haystack Node:
       1. Aktualizuje volume_id, haystack_offset, haystack_size v DB
-      2. Změní status na "ready"
-      3. Zaúčtuje billing (storage bytes)
-    Spouštět jako asyncio.create_task() při startu aplikace.
+      2. Zmeni status na "ready"
+      3. Zaucntuje billing (storage bytes)
+    Spoustet jako asyncio.create_task() pri startu aplikace.
     """
-    import endpoints.files as _self  # dynamické čtení BROKER_URI při každém reconnectu
+    import endpoints.files as _self
     reconnect_delay = 2
 
     while True:
         try:
             current_broker_uri = _self.BROKER_URI
-            log.info("ACK listener: připojuji se k brokeru %s", current_broker_uri)
+            log.info("ACK listener: pripojuji se k brokeru %s", current_broker_uri)
             async with websockets.connect(
                 current_broker_uri,
                 max_queue=None,
@@ -75,14 +70,14 @@ async def storage_ack_listener():
             ) as ws:
                 sub: bytes = msgpack.packb({"action": "subscribe", "topic": "storage.ack"})  # type: ignore[assignment]
                 await ws.send(sub)
-                log.info("ACK listener: subscribován na storage.ack")
+                log.info("ACK listener: subscribovan na storage.ack")
                 reconnect_delay = 2
 
                 async for raw in ws:
                     try:
                         msg = msgpack.unpackb(raw, raw=False) if isinstance(raw, bytes) else json.loads(raw)
                     except Exception as e:
-                        log.error("ACK listener: chyba dekódování: %s", e)
+                        log.error("ACK listener: chyba dekodovani: %s", e)
                         continue
 
                     action = msg.get("action", "")
@@ -93,67 +88,60 @@ async def storage_ack_listener():
                         message_id = msg.get("message_id")
                         payload = msg.get("payload", {})
                         await _process_ack(payload)
-                        # Potvrdit doručení
                         ack_msg: bytes = msgpack.packb({"action": "ack", "message_id": message_id})  # type: ignore[assignment]
                         await ws.send(ack_msg)
 
         except (websockets.ConnectionClosed, ConnectionRefusedError, OSError) as e:
-            log.warning("ACK listener: broker nedostupný (%s), zkouším za %ds", e, reconnect_delay)
+            log.warning("ACK listener: broker nedostupny (%s), zkusim za %ds", e, reconnect_delay)
             await asyncio.sleep(reconnect_delay)
             reconnect_delay = min(reconnect_delay * 2, 30)
 
 
 async def _process_ack(payload: dict):
-    """Zpracuje jedno ACK potvrzení od Haystack Node."""
     object_id = payload.get("object_id")
     volume_id = payload.get("volume_id")
     offset = payload.get("offset")
     size = payload.get("size")
 
     if not all(v is not None for v in [object_id, volume_id, offset, size]):
-        log.error("Neúplné ACK: %s", payload)
+        log.error("Neuplne ACK: %s", payload)
         return
 
-    # Po kontrole výše jsou všechny hodnoty zaručeně not None
-    # – explicitní assert pro type checker
     assert object_id is not None
     assert volume_id is not None
     assert offset is not None
     assert size is not None
 
     def _update_db():
-        db = get_sync_session()
-        try:
-            record = db.query(FileRecord).filter(FileRecord.id == object_id).first()
-            if not record:
-                log.warning("ACK pro neznámý object_id=%s", object_id)
-                return
-            if record.status != "uploading":
-                log.warning("ACK pro object_id=%s se statusem %s (očekáváno uploading)", object_id, record.status)
-                return
+        with get_sync_session() as db:
+            try:
+                record = db.query(FileRecord).filter(FileRecord.id == object_id).first()
+                if not record:
+                    log.warning("ACK pro neznamy object_id=%s", object_id)
+                    return
+                if record.status != "uploading":
+                    log.warning("ACK pro object_id=%s se statusem %s (ocekavano uploading)", object_id, record.status)
+                    return
 
-            record.volume_id = volume_id
-            record.haystack_offset = offset
-            record.haystack_size = size
-            record.status = "ready"
+                record.volume_id = volume_id
+                record.haystack_offset = offset
+                record.haystack_size = size
+                record.status = "ready"
 
-            # Billing: zaúčtuj storage bytes při potvrzení uložení
-            bucket = db.query(Bucket).filter(Bucket.id == record.bucket_id).first()
-            if bucket:
-                bucket.current_storage_bytes += size
+                bucket = db.query(Bucket).filter(Bucket.id == record.bucket_id).first()
+                if bucket:
+                    bucket.current_storage_bytes += size
 
-            db.commit()
-            log.info("ACK zpracován: object_id=%s → volume=%d offset=%d size=%d", object_id, volume_id, offset, size)
-        except Exception as e:
-            db.rollback()
-            log.error("Chyba při zpracování ACK: %s", e)
-        finally:
-            db.close()
+                db.commit()
+                log.info("ACK zpracovan: object_id=%s -> volume=%d offset=%d size=%d", object_id, volume_id, offset, size)
+            except Exception as e:
+                db.rollback()
+                log.error("Chyba pri zpracovani ACK: %s", e)
 
     await run_in_threadpool(_update_db)
 
 
-# ── Veřejné endpointy ─────────────────────────────────────────────────────────
+# -- Verejne endpointy -------------------------------------------------------
 
 @files_router.get("/", response_model=FileListResponse, status_code=200)
 def get_files(
@@ -192,13 +180,16 @@ async def get_specific_file(
     if not record:
         raise HTTPException(status_code=404, detail="Soubor nenalezen")
     if record.is_deleted:
-        raise HTTPException(status_code=404, detail="Soubor byl smazán")
+        raise HTTPException(status_code=404, detail="Soubor byl smazan")
     if record.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Přístup odepřen")
+        raise HTTPException(status_code=403, detail="Pristup odepren")
     if record.status == "uploading":
-        raise HTTPException(status_code=202, detail="Soubor se ještě nahrává, zkus to za chvíli")
+        return Response(
+            content='{"detail":"Soubor se jeste nahraje, zkus to za chvili"}',
+            status_code=202,
+            media_type="application/json",
+        )
 
-    # Billing
     is_internal = x_internal_source and x_internal_source.lower() == "true"
     bucket = db.query(Bucket).filter(Bucket.id == record.bucket_id).first()
     if bucket:
@@ -209,7 +200,6 @@ async def get_specific_file(
             bucket.egress_bytes += record.size
         db.commit()
 
-    # ── Haystack čtení ────────────────────────────────────────────────────────
     if record.volume_id is not None:
         import endpoints.files as _self
         url = f"{_self.HAYSTACK_URL}/volume/{record.volume_id}/{record.haystack_offset}/{record.haystack_size}"
@@ -217,9 +207,9 @@ async def get_specific_file(
             try:
                 resp = await client.get(url, timeout=30.0)
             except httpx.RequestError as e:
-                raise HTTPException(status_code=503, detail=f"Haystack Node nedostupný: {e}")
+                raise HTTPException(status_code=503, detail=f"Haystack Node nedostupny: {e}")
         if resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"Haystack vrátil chybu: {resp.status_code}")
+            raise HTTPException(status_code=502, detail=f"Haystack vratil chybu: {resp.status_code}")
 
         return Response(
             content=resp.content,
@@ -227,11 +217,10 @@ async def get_specific_file(
             headers={"Content-Disposition": f'attachment; filename="{record.filename}"'},
         )
 
-    # ── Fallback: lokální disk (starší záznamy bez Haystack) ──────────────────
     from pathlib import Path
     path = Path(record.path)
     if not path.exists():
-        raise HTTPException(status_code=404, detail="Soubor chybí na disku")
+        raise HTTPException(status_code=404, detail="Soubor chybi na disku")
 
     def _iter_file():
         with open(path, "rb") as f:
@@ -257,15 +246,14 @@ def delete_specific_file(
     if not record:
         raise HTTPException(status_code=404, detail="Soubor nenalezen")
     if record.is_deleted:
-        raise HTTPException(status_code=404, detail="Soubor již byl smazán")
+        raise HTTPException(status_code=404, detail="Soubor jiz byl smazan")
     if record.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Přístup odepřen")
+        raise HTTPException(status_code=403, detail="Pristup odepren")
 
-    # Soft delete – Haystack Node se o mazání NEDOZVÍ, data fyzicky zůstávají
     record.is_deleted = True
     db.commit()
 
-    return DeleteResponse(message="Soubor úspěšně smazán (soft delete)", id=file_id)
+    return DeleteResponse(message="Soubor uspesne smazan (soft delete)", id=file_id)
 
 
 @files_router.post("/upload", response_model=CreateFile, status_code=202)
@@ -276,11 +264,6 @@ async def create_file(
     x_internal_source: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
 ):
-    """
-    Přijme soubor, uloží metadata se statusem "uploading" a odešle
-    binární data do Haystack Node přes broker (topic: storage.write).
-    Vrátí 202 Accepted – soubor JEŠTĚ NENÍ fyzicky uložen.
-    """
     bucket = db.query(Bucket).filter(Bucket.id == bucket_id).first()
     if not bucket:
         raise HTTPException(status_code=404, detail="Bucket nenalezen")
@@ -288,16 +271,14 @@ async def create_file(
     user_id = x_user_id or "default_user"
     file_id = generate_file_id()
 
-    # Přečteme celý soubor do paměti (nutné pro odeslání přes broker)
     data: bytes = await file.read()
     size = len(data)
 
-    # Uložíme metadata se statusem "uploading"
     record = FileRecord(
         id=file_id,
         user_id=user_id,
         filename=file.filename or "unknown",
-        path="",          # žádný lokální disk
+        path="",
         size=size,
         content_type=file.content_type,
         bucket_id=bucket_id,
@@ -305,7 +286,6 @@ async def create_file(
     )
     db.add(record)
 
-    # Billing ingress (zaúčtuje se přijetí dat, storage až po ACK)
     is_internal = x_internal_source and x_internal_source.lower() == "true"
     bucket.bandwidth_bytes += size
     if is_internal:
@@ -316,14 +296,11 @@ async def create_file(
     db.commit()
     db.refresh(record)
 
-    # Publikujeme binární data do brokeru
     payload = {
         "object_id": file_id,
-        "data": list(data),   # msgpack přenese jako bytes array
+        "data": data,
     }
-    msg_id = await run_in_threadpool(_store_message_sync, "storage.write", payload)
-    deliver = DeliverMessage(topic="storage.write", message_id=msg_id, payload=payload)
-    await manager.broadcast(deliver.model_dump(), "storage.write")
+    await publish_to_broker("storage.write", payload)
 
     return CreateFile(
         id=record.id,
@@ -333,14 +310,17 @@ async def create_file(
     )
 
 
-# ── Interní endpointy pro compact.py ─────────────────────────────────────────
+# -- Interni endpointy pro compact.py ----------------------------------------
 
 @files_router.get("/internal/volume/{volume_id}/objects")
-def get_volume_objects(volume_id: int, db: Session = Depends(get_db)):
-    """
-    Vrátí seznam všech nesmazaných objektů uložených v daném svazku.
-    Používá compact.py / Haystack Node při kompakci.
-    """
+def get_volume_objects(
+    volume_id: int,
+    x_internal_source: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    if not x_internal_source or x_internal_source.lower() != "true":
+        raise HTTPException(status_code=403, detail="Pristup odepren")
+
     records = (
         db.query(FileRecord)
         .filter(
@@ -361,11 +341,14 @@ def get_volume_objects(volume_id: int, db: Session = Depends(get_db)):
 
 
 @files_router.post("/internal/bulk-update-location")
-def bulk_update_location(body: dict, db: Session = Depends(get_db)):
-    """
-    Hromadně aktualizuje haystack_offset (a případně volume_id) po kompakci.
-    Vstup: {"updates": [{"object_id": "...", "volume_id": 1, "new_offset": 0, "new_size": 1024}]}
-    """
+def bulk_update_location(
+    body: dict,
+    x_internal_source: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    if not x_internal_source or x_internal_source.lower() != "true":
+        raise HTTPException(status_code=403, detail="Pristup odepren")
+
     updates = body.get("updates", [])
     for upd in updates:
         record = db.query(FileRecord).filter(FileRecord.id == upd["object_id"]).first()

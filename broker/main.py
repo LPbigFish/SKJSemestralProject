@@ -1,82 +1,81 @@
+"""
+broker/main.py - Message Broker
+===============================
+Standalone Pub/Sub message broker service.
+
+Spusteni:
+    python -m broker.main
+    # nebo
+    python broker/main.py --host 0.0.0.0 --port 8082
+"""
+
+import argparse
 import asyncio
+import base64
 import json
+import logging
 from typing import Any
 
 import msgpack
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import uvicorn
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from repository.db import engine
-from repository.repo import QueuedMessage
-from schemas.broker import BrokerMessage, DeliverMessage, SubscribedMessage
+from broker.connection_manager import ConnectionManager
+from broker.db import engine, get_sync_session, init_db
+from broker.models import QueuedMessage
 
-broker_router = APIRouter()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [BROKER] %(levelname)s %(message)s",
+)
+log = logging.getLogger(__name__)
 
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: dict[str, set[WebSocket]] = {}
-        self.ws_topics: dict[WebSocket, str] = {}
-        self.ws_binary: dict[WebSocket, bool] = {}
-        self.ws_locks: dict[WebSocket, asyncio.Lock] = {}
-        self._lock = asyncio.Lock()
+class BrokerMessage(BaseModel):
+    action: str
+    topic: str | None = None
+    payload: Any = None
+    message_id: int | None = None
 
-    async def add(self, websocket: WebSocket, topic: str, binary: bool = False):
-        async with self._lock:
-            self.active_connections.setdefault(topic, set()).add(websocket)
-            self.ws_topics[websocket] = topic
-            self.ws_binary[websocket] = binary
-            self.ws_locks[websocket] = asyncio.Lock()
 
-    async def remove(self, websocket: WebSocket):
-        async with self._lock:
-            topic = self.ws_topics.pop(websocket, None)
-            self.ws_binary.pop(websocket, None)
-            self.ws_locks.pop(websocket, None)
-            if topic and topic in self.active_connections:
-                self.active_connections[topic].discard(websocket)
-                if not self.active_connections[topic]:
-                    del self.active_connections[topic]
+class DeliverMessage(BaseModel):
+    action: str = "deliver"
+    topic: str
+    message_id: int
+    payload: Any
 
-    async def send_message(self, ws: WebSocket, data: dict):
-        async with self._lock:
-            binary = self.ws_binary.get(ws, False)
-            lock = self.ws_locks.get(ws)
 
-        if lock is None:
-            return
-
-        try:
-            async with lock:
-                if binary:
-                    packed = msgpack.packb(data)
-                    if isinstance(packed, bytes):
-                        await ws.send_bytes(packed)
-                else:
-                    await ws.send_json(data)
-        except Exception:
-            await self.remove(ws)
-
-    async def broadcast(self, data: dict, topic: str):
-        async with self._lock:
-            targets = list(self.active_connections.get(topic, set()))
-
-        if not targets:
-            return
-
-        await asyncio.gather(
-            *(self.send_message(ws, data) for ws in targets)
-        )
+class SubscribedMessage(BaseModel):
+    action: str = "subscribed"
+    topic: str
 
 
 manager = ConnectionManager()
 
 
+def _serialize_payload(payload: Any) -> str:
+    """Serialize payload to string, handling bytes values via base64."""
+    import msgpack as _mp
+
+    def _convert(obj):
+        if isinstance(obj, bytes):
+            return {"__bytes_b64__": base64.b64encode(obj).decode("ascii")}
+        if isinstance(obj, dict):
+            return {k: _convert(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_convert(v) for v in obj]
+        return obj
+
+    return json.dumps(_convert(payload))
+
+
 def _store_message_sync(topic: str, payload: Any) -> int:
-    with Session(bind=engine.connect()) as session:
-        msg = QueuedMessage(topic=topic, payload=json.dumps(payload))
+    with get_sync_session() as session:
+        msg = QueuedMessage(topic=topic, payload=_serialize_payload(payload))
         session.add(msg)
         session.flush()
         msg_id = msg.id
@@ -85,7 +84,7 @@ def _store_message_sync(topic: str, payload: Any) -> int:
 
 
 def _ack_message_sync(message_id: int):
-    with Session(bind=engine.connect()) as session:
+    with get_sync_session() as session:
         session.execute(
             update(QueuedMessage)
             .where(QueuedMessage.id == message_id)
@@ -94,8 +93,22 @@ def _ack_message_sync(message_id: int):
         session.commit()
 
 
+def _deserialize_payload(payload_str: str) -> Any:
+    """Deserialize payload from string, restoring base64-encoded bytes."""
+    def _convert(obj):
+        if isinstance(obj, dict):
+            if "__bytes_b64__" in obj:
+                return base64.b64decode(obj["__bytes_b64__"])
+            return {k: _convert(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_convert(v) for v in obj]
+        return obj
+
+    return _convert(json.loads(payload_str))
+
+
 def _load_pending_sync(topic: str) -> list[dict]:
-    with Session(bind=engine.connect()) as session:
+    with get_sync_session() as session:
         rows = session.scalars(
             select(QueuedMessage)
             .where(
@@ -108,13 +121,12 @@ def _load_pending_sync(topic: str) -> list[dict]:
             {
                 "topic": m.topic,
                 "message_id": m.id,
-                "payload": json.loads(m.payload),
+                "payload": _deserialize_payload(m.payload),
             }
             for m in rows
         ]
 
 
-@broker_router.websocket("/broker")
 async def broker_endpoint(websocket: WebSocket):
     await websocket.accept()
     topic: str | None = None
@@ -168,3 +180,34 @@ async def broker_endpoint(websocket: WebSocket):
     finally:
         if topic:
             await manager.remove(websocket)
+
+
+app = FastAPI(title="Message Broker")
+
+app.websocket("/broker")(broker_endpoint)
+
+
+@app.get("/")
+def info():
+    return {"status": "Message Broker is RUNNING"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Message Broker")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8082)
+    args = parser.parse_args()
+
+    init_db()
+    log.info("Broker database initialized")
+
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()

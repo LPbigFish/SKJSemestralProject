@@ -1,18 +1,16 @@
 """
 tests/test_haystack.py
 ======================
-Testy pro Haystack Storage Node (haystack_node.py).
+Tests for Haystack Storage Node.
 
-Spuštění:
-    pytest tests/test_haystack.py -v
-
-Požadavky: pytest, pytest-asyncio, httpx, msgpack, websockets
+Requires: pytest, pytest-asyncio, httpx, msgpack, websockets
 """
 
 import asyncio
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -25,17 +23,24 @@ import pytest
 import uvicorn
 import websockets
 
-# ── Konfigurace testovacího serveru ───────────────────────────────────────────
+project_root = str(Path(__file__).resolve().parent.parent)
+broker_path = str(Path(__file__).resolve().parent.parent / "broker")
+src_path = str(Path(__file__).resolve().parent.parent / "src")
+for p in [project_root, broker_path, src_path]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+from broker.db import init_db
 
 HAYSTACK_HOST = "127.0.0.1"
 HAYSTACK_PORT = 18770
 HAYSTACK_URL = f"http://{HAYSTACK_HOST}:{HAYSTACK_PORT}"
 
-# Broker (hlavní gateway) – musí běžet pro integrační testy ACK toku
 BROKER_HOST = "127.0.0.1"
 BROKER_PORT = 18771
 BROKER_URI = f"ws://{BROKER_HOST}:{BROKER_PORT}/broker"
-GATEWAY_URL = f"http://{BROKER_HOST}:{BROKER_PORT}"
+GATEWAY_PORT = 18772
+GATEWAY_URL = f"http://{BROKER_HOST}:{GATEWAY_PORT}"
 
 WS_OPTS = {
     "max_queue": None,
@@ -44,29 +49,27 @@ WS_OPTS = {
     "ping_timeout": None,
 }
 
-# Dočasná složka pro volume soubory – izolovaná pro každý test run
 _TEST_VOLUME_DIR: Path = Path(tempfile.mkdtemp(prefix="haystack_test_"))
 
 
-# ── Spuštění Haystack Node v threadu ─────────────────────────────────────────
+def _run_broker():
+    from broker.main import app
+    init_db()
+    uvicorn.run(app, host=BROKER_HOST, port=BROKER_PORT, log_level="error")
+
 
 def _run_haystack_server():
-    import sys
-    # Přidáme složku src/haystack (tam kde leží haystack_node.py) do sys.path
     haystack_path = str(Path(__file__).resolve().parent.parent / "src" / "haystack")
     if haystack_path not in sys.path:
         sys.path.insert(0, haystack_path)
 
     import haystack_node as hn  # type: ignore[import-unresolved]
 
-    # Nastavíme globální proměnné PŘÍMO na modulu – musí být před uvicorn.run
-    # protože startup event čte tyto hodnoty při inicializaci
     hn.BROKER_URI = BROKER_URI
     hn.GATEWAY_URL = GATEWAY_URL
     hn.VOLUME_DIR = _TEST_VOLUME_DIR
-    hn.MAX_VOLUME_BYTES = 1 * 1024 * 1024  # 1 MB – malý limit pro test rotace
+    hn.MAX_VOLUME_BYTES = 1 * 1024 * 1024
 
-    # Také resetujeme stav svazků aby testy byly izolované
     hn._current_volume_id = 1
     hn._current_file = None
 
@@ -79,24 +82,18 @@ def _run_haystack_server():
 
 
 def _run_gateway_server():
-    import sys
-    project_root = str(Path(__file__).resolve().parent.parent)
-    src_path = str(Path(__file__).resolve().parent.parent / "src")
-    for p in [src_path, project_root]:
-        if p not in sys.path:
-            sys.path.insert(0, p)
-
-    # Nastavíme BROKER_URI na modulu files PŘED spuštěním serveru,
-    # aby storage_ack_listener použil testovací broker místo localhost:8080
     from endpoints import files as files_module
     files_module.BROKER_URI = BROKER_URI
     files_module.HAYSTACK_URL = HAYSTACK_URL
+
+    import broker_client
+    broker_client.BROKER_URI = BROKER_URI
 
     from main import app
     uvicorn.run(
         app,
         host=BROKER_HOST,
-        port=BROKER_PORT,
+        port=GATEWAY_PORT,
         log_level="error",
         ws_ping_interval=None,
         ws_ping_timeout=None,
@@ -105,7 +102,10 @@ def _run_gateway_server():
 
 @pytest.fixture(scope="module", autouse=True)
 def servers():
-    """Spustí Haystack Node a S3 Gateway v daemon threadech."""
+    broker_thread = threading.Thread(target=_run_broker, daemon=True)
+    broker_thread.start()
+    time.sleep(0.5)
+
     gw_thread = threading.Thread(target=_run_gateway_server, daemon=True)
     gw_thread.start()
     time.sleep(1.0)
@@ -116,11 +116,8 @@ def servers():
 
     yield
 
-    # Úklid volume souborů po všech testech
     shutil.rmtree(_TEST_VOLUME_DIR, ignore_errors=True)
 
-
-# ── Pomocné funkce ────────────────────────────────────────────────────────────
 
 async def _create_bucket(name: Optional[str] = None) -> int:
     async with httpx.AsyncClient() as client:
@@ -133,7 +130,6 @@ async def _create_bucket(name: Optional[str] = None) -> int:
 
 
 async def _upload_via_gateway(bucket_id: int, data: bytes, filename: str = "test.bin") -> dict:
-    """Nahraje soubor přes S3 Gateway a počká na status ready (ACK od Haystack)."""
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{GATEWAY_URL}/files/upload",
@@ -141,10 +137,9 @@ async def _upload_via_gateway(bucket_id: int, data: bytes, filename: str = "test
             files={"file": (filename, data, "application/octet-stream")},
             data={"bucket_id": str(bucket_id)},
         )
-        assert resp.status_code == 202, f"Upload selhal: {resp.text}"
+        assert resp.status_code == 202, f"Upload failed: {resp.text}"
         file_id = resp.json()["id"]
 
-    # Počkáme na ACK (Haystack zapíše a Gateway aktualizuje status na "ready")
     for _ in range(30):
         await asyncio.sleep(0.2)
         async with httpx.AsyncClient() as client:
@@ -154,16 +149,14 @@ async def _upload_via_gateway(bucket_id: int, data: bytes, filename: str = "test
             )
             if resp.status_code == 200:
                 return {"id": file_id, "data": resp.content}
-        # 202 = ještě se nahrává, čekáme dál
 
-    pytest.fail(f"Soubor {file_id} nedosáhl stavu ready do 6 sekund")
+    pytest.fail(f"File {file_id} did not reach ready state within 6 seconds")
 
 
-# ── Unit testy: přímé HTTP volání na Haystack Node ────────────────────────────
+# -- Unit tests: direct HTTP to Haystack Node --------------------------------
 
 @pytest.mark.asyncio
 async def test_health_endpoint():
-    """Haystack Node odpovídá na /health."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{HAYSTACK_URL}/health")
     assert resp.status_code == 200
@@ -175,11 +168,9 @@ async def test_health_endpoint():
 
 @pytest.mark.asyncio
 async def test_write_and_read_single_needle():
-    """Přímý zápis přes broker a čtení přes HTTP endpoint."""
-    data = b"Hello, Haystack! " * 100  # 1700 bajtů
+    data = b"Hello, Haystack! " * 100
 
     async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:  # type: ignore[call-overload]
-        # Subscribujeme na storage.ack abychom dostali offset/size
         sub_msg: bytes = msgpack.packb(  # type: ignore[assignment]
             {"action": "subscribe", "topic": "storage.ack"}
         )
@@ -189,7 +180,6 @@ async def test_write_and_read_single_needle():
         msg = msgpack.unpackb(raw, raw=False) if isinstance(raw, bytes) else json.loads(raw)
         assert msg.get("action") == "subscribed"
 
-        # Publikujeme zápis
         object_id = f"test-needle-{int(time.time() * 1000)}"
         pub_msg: bytes = msgpack.packb(  # type: ignore[assignment]
             {
@@ -197,13 +187,12 @@ async def test_write_and_read_single_needle():
                 "topic": "storage.write",
                 "payload": {
                     "object_id": object_id,
-                    "data": list(data),
+                    "data": data,
                 },
             }
         )
         await ws.send(pub_msg)
 
-        # Čekáme na ACK od Haystack Node
         ack = None
         for _ in range(20):
             raw = await asyncio.wait_for(ws.recv(), timeout=3.0)
@@ -212,13 +201,12 @@ async def test_write_and_read_single_needle():
                 ack = msg["payload"]
                 break
 
-    assert ack is not None, "Haystack neodeslal ACK"
+    assert ack is not None, "Haystack did not send ACK"
     assert ack["object_id"] == object_id
     assert ack["size"] == len(data)
     assert ack["offset"] >= 0
     assert ack["volume_id"] >= 1
 
-    # Přečteme data přímo z Haystack Node
     volume_id = ack["volume_id"]
     offset = ack["offset"]
     size = ack["size"]
@@ -232,7 +220,6 @@ async def test_write_and_read_single_needle():
 
 @pytest.mark.asyncio
 async def test_read_nonexistent_volume_returns_404():
-    """Čtení z neexistujícího svazku vrátí 404."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{HAYSTACK_URL}/volume/9999/0/10")
     assert resp.status_code == 404
@@ -240,9 +227,8 @@ async def test_read_nonexistent_volume_returns_404():
 
 @pytest.mark.asyncio
 async def test_multiple_needles_correct_offsets():
-    """Více zápisů za sebou – každý musí mít unikátní a správný offset."""
     payloads = [
-        b"prvni-data-" + bytes([i] * 50)
+        b"first-data-" + bytes([i] * 50)
         for i in range(5)
     ]
     acks = []
@@ -256,7 +242,6 @@ async def test_multiple_needles_correct_offsets():
         msg = msgpack.unpackb(raw, raw=False) if isinstance(raw, bytes) else json.loads(raw)
         assert msg.get("action") == "subscribed"
 
-        # Mapujeme object_id → původní data, abychom mohli správně párovat ACK
         object_ids = []
         for i, data in enumerate(payloads):
             object_id = f"multi-needle-{i}-{int(time.time() * 1000)}"
@@ -265,7 +250,7 @@ async def test_multiple_needles_correct_offsets():
                 {
                     "action": "publish",
                     "topic": "storage.write",
-                    "payload": {"object_id": object_id, "data": list(data)},
+                    "payload": {"object_id": object_id, "data": data},
                 }
             )
             await ws.send(pub_msg)
@@ -273,7 +258,6 @@ async def test_multiple_needles_correct_offsets():
         payload_map = dict(zip(object_ids, payloads))
         our_ids = set(object_ids)
 
-        # Sesbíráme ACK pouze pro naše object_ids (filtrujeme zprávy z jiných testů)
         for _ in range(len(payloads)):
             for _ in range(20):
                 raw = await asyncio.wait_for(ws.recv(), timeout=3.0)
@@ -284,13 +268,11 @@ async def test_multiple_needles_correct_offsets():
                     acks.append(msg["payload"])
                     break
 
-    assert len(acks) == len(payloads), f"Očekáváno {len(payloads)} ACK, dostáno {len(acks)}"
+    assert len(acks) == len(payloads), f"Expected {len(payloads)} ACKs, got {len(acks)}"
 
-    # Ověříme, že každý offset je unikátní
     offsets = [a["offset"] for a in acks]
-    assert len(set(offsets)) == len(offsets), f"Duplicitní offsety: {offsets}"
+    assert len(set(offsets)) == len(offsets), f"Duplicate offsets: {offsets}"
 
-    # Ověříme data podle object_id – správné párování bez závislosti na pořadí
     for ack in acks:
         original_data = payload_map[ack["object_id"]]
         async with httpx.AsyncClient() as client:
@@ -299,24 +281,18 @@ async def test_multiple_needles_correct_offsets():
             )
         assert resp.status_code == 200
         assert resp.content == original_data, (
-            f"Data na offset {ack['offset']} nesedí pro object_id {ack['object_id']}"
+            f"Data at offset {ack['offset']} mismatch for {ack['object_id']}"
         )
 
 
 @pytest.mark.asyncio
 async def test_volume_rotation():
-    """
-    Zápis dat větších než MAX_VOLUME_BYTES (1 MB v testu) způsobí rotaci svazku.
-    Po rotaci musí existovat volume_2.dat (nebo vyšší).
-    """
-    # Zjistíme aktuální aktivní svazek
     async with httpx.AsyncClient() as client:
         health_before = (await client.get(f"{HAYSTACK_URL}/health")).json()
     volume_before = health_before["active_volume"]
 
-    # Zapíšeme data větší než limit (1 MB)
-    big_data = os.urandom(600 * 1024)   # 600 KB
-    big_data_2 = os.urandom(600 * 1024)  # dalších 600 KB → celkem >1 MB → rotace
+    big_data = os.urandom(600 * 1024)
+    big_data_2 = os.urandom(600 * 1024)
 
     async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:  # type: ignore[call-overload]
         sub_msg: bytes = msgpack.packb(  # type: ignore[assignment]
@@ -334,13 +310,12 @@ async def test_volume_rotation():
                     "topic": "storage.write",
                     "payload": {
                         "object_id": f"rotation-test-{i}",
-                        "data": list(chunk),
+                        "data": chunk,
                     },
                 }
             )
             await ws.send(pub_msg)
 
-        # Počkáme na oba ACK
         received = 0
         for _ in range(40):
             raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
@@ -350,21 +325,19 @@ async def test_volume_rotation():
             if received == 2:
                 break
 
-    assert received == 2, "Nezískány oba ACK po velkém zápisu"
+    assert received == 2, "Did not get both ACKs after large write"
 
-    # Aktivní svazek se musí zvýšit
     async with httpx.AsyncClient() as client:
         health_after = (await client.get(f"{HAYSTACK_URL}/health")).json()
     volume_after = health_after["active_volume"]
 
     assert volume_after > volume_before, (
-        f"Rotace nenastala: volume_before={volume_before}, volume_after={volume_after}"
+        f"Rotation did not occur: before={volume_before}, after={volume_after}"
     )
 
 
 @pytest.mark.asyncio
 async def test_list_volumes():
-    """/volumes vrátí seznam existujících svazků."""
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{HAYSTACK_URL}/volumes")
     assert resp.status_code == 200
@@ -376,27 +349,20 @@ async def test_list_volumes():
         assert "size_bytes" in v
 
 
-# ── Integrační testy: celý tok Gateway → Broker → Haystack → ACK ─────────────
+# -- Integration tests: Gateway -> Broker -> Haystack -> ACK ------------------
 
 @pytest.mark.asyncio
 async def test_upload_via_gateway_and_download():
-    """
-    Celý tok: POST /files/upload → broker → Haystack zápis → ACK → GET /files/{id}.
-    """
     bucket_id = await _create_bucket()
-    original_data = os.urandom(4096)  # 4 KB náhodných dat
+    original_data = os.urandom(4096)
 
     result = await _upload_via_gateway(bucket_id, original_data, "binary_test.bin")
 
-    assert result["data"] == original_data, "Stažená data se neshodují s nahranými"
+    assert result["data"] == original_data, "Downloaded data does not match uploaded"
 
 
 @pytest.mark.asyncio
 async def test_upload_status_uploading_then_ready():
-    """
-    Ihned po uploadu je status 'uploading', po ACK přejde na 'ready'.
-    Ověříme nepřímo: GET souboru vrátí 202 ihned a pak 200 po ACK.
-    """
     bucket_id = await _create_bucket()
     data = os.urandom(1024)
 
@@ -410,7 +376,6 @@ async def test_upload_status_uploading_then_ready():
     assert resp.status_code == 202
     file_id = resp.json()["id"]
 
-    # Počkáme na ready stav
     ready = False
     for _ in range(30):
         await asyncio.sleep(0.2)
@@ -424,21 +389,17 @@ async def test_upload_status_uploading_then_ready():
             assert get_resp.content == data
             break
 
-    assert ready, "Soubor nedosáhl stavu ready"
+    assert ready, "File did not reach ready state"
 
 
 @pytest.mark.asyncio
 async def test_soft_delete_hides_file():
-    """
-    Po soft delete GET vrátí 404, ale data ve volume souboru fyzicky zůstávají.
-    """
     bucket_id = await _create_bucket()
     data = b"soft-delete-test-data"
 
     result = await _upload_via_gateway(bucket_id, data)
     file_id = result["id"]
 
-    # Soft delete
     async with httpx.AsyncClient() as client:
         del_resp = await client.delete(
             f"{GATEWAY_URL}/files/{file_id}",
@@ -446,7 +407,6 @@ async def test_soft_delete_hides_file():
         )
     assert del_resp.status_code == 200
 
-    # GET musí vrátit 404
     async with httpx.AsyncClient() as client:
         get_resp = await client.get(
             f"{GATEWAY_URL}/files/{file_id}",
@@ -457,7 +417,6 @@ async def test_soft_delete_hides_file():
 
 @pytest.mark.asyncio
 async def test_multiple_files_independent_reads():
-    """Nahrání více souborů – každý se musí stáhnout správně nezávisle."""
     bucket_id = await _create_bucket()
 
     files = {
@@ -472,27 +431,22 @@ async def test_multiple_files_independent_reads():
         results[filename] = (data, result["data"])
 
     for filename, (original, downloaded) in results.items():
-        assert original == downloaded, f"Soubor {filename}: data se neshodují"
+        assert original == downloaded, f"File {filename}: data mismatch"
 
 
 @pytest.mark.asyncio
 async def test_invalid_message_does_not_crash_node():
-    """
-    Neplatná zpráva (chybí object_id) nesmí shodit Haystack Node.
-    Node musí zůstat funkční pro další požadavky.
-    """
     async with websockets.connect(BROKER_URI, **WS_OPTS) as ws:  # type: ignore[call-overload]
         bad_msg: bytes = msgpack.packb(  # type: ignore[assignment]
             {
                 "action": "publish",
                 "topic": "storage.write",
-                "payload": {"data": list(b"some data")},  # chybí object_id
+                "payload": {"data": b"some data"},
             }
         )
         await ws.send(bad_msg)
         await asyncio.sleep(0.5)
 
-    # Node musí stále odpovídat
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{HAYSTACK_URL}/health")
     assert resp.status_code == 200
