@@ -15,3 +15,7 @@ storage/
 
 *.db-wal
 *.db-shm
+
+haystack_volumes/
+.opencode/
+frontend/.svelte-kit/
