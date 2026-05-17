@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { getFiles, listBucketObjects, createBucket } from '$lib/api';
-	import type { FileMetadata } from '$lib/types';
+	import { getFiles, listBucketObjects, createBucket, listBuckets } from '$lib/api';
+	import type { BucketResponse, FileMetadata } from '$lib/types';
 	import FileUpload from '$lib/components/FileUpload.svelte';
 	import FileBrowser from '$lib/components/FileBrowser.svelte';
 	import BillingDashboard from '$lib/components/BillingDashboard.svelte';
@@ -13,6 +13,16 @@
 	let error = $state<string | null>(null);
 	let newBucketName = $state('');
 	let creatingBucket = $state(false);
+	let buckets = $state.raw<BucketResponse[]>([]);
+
+	async function refreshBuckets() {
+		try {
+			const res = await listBuckets();
+			buckets = res.buckets;
+		} catch {
+			buckets = [];
+		}
+	}
 
 	async function refreshFiles() {
 		if (!userId) {
@@ -49,6 +59,7 @@
 			const bucket = await createBucket({ name: newBucketName.trim() }, userId || undefined);
 			bucketId = String(bucket.id);
 			newBucketName = '';
+			await refreshBuckets();
 			await refreshFiles();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create bucket';
@@ -62,6 +73,10 @@
 	}
 
 	let bucketIdNum = $derived(Number(bucketId) || 0);
+
+	$effect(() => {
+		refreshBuckets();
+	});
 
 	$effect(() => {
 		if (userId && bucketIdNum) refreshFiles();
@@ -96,15 +111,27 @@
 				</button>
 			</div>
 		</div>
-		<div style="min-width: 120px;">
-			<label for="bucket-id" class="mb-1 block text-sm font-medium text-gray-700">Bucket ID</label>
-			<input
-				id="bucket-id"
-				type="number"
-				bind:value={bucketId}
-				placeholder="e.g. 1"
-				class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-			/>
+		<div style="min-width: 200px;">
+			<label for="bucket-select" class="mb-1 block text-sm font-medium text-gray-700">Bucket</label>
+			<div class="flex gap-2">
+				<select
+					id="bucket-select"
+					bind:value={bucketId}
+					class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+				>
+					<option value="">All files (no bucket)</option>
+					{#each buckets as b (b.id)}
+						<option value={String(b.id)}>{b.name} (#{b.id})</option>
+					{/each}
+				</select>
+				<input
+					type="number"
+					bind:value={bucketId}
+					placeholder="ID"
+					class="w-20 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+					title="Or type a bucket ID directly"
+				/>
+			</div>
 		</div>
 	</div>
 
@@ -148,7 +175,7 @@
 			<div
 				class="mb-6 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-700"
 			>
-				Enter a Bucket ID or create a new bucket above to enable file uploads and processing.
+				Select a bucket from the dropdown or create a new one to enable file uploads and processing.
 			</div>
 		{/if}
 

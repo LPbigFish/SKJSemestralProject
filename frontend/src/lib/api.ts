@@ -1,6 +1,7 @@
 import type {
 	BillingResponse,
 	BucketCreate,
+	BucketListResponse,
 	BucketObjectListResponse,
 	BucketResponse,
 	CreateFileResponse,
@@ -70,6 +71,12 @@ export async function createBucket(data: BucketCreate, userId?: string): Promise
 		body: JSON.stringify(data)
 	});
 	if (!res.ok) throw new Error(`Failed to create bucket: ${res.status}`);
+	return res.json();
+}
+
+export async function listBuckets(): Promise<BucketListResponse> {
+	const res = await fetch('/api/buckets/');
+	if (!res.ok) throw new Error(`Failed to list buckets: ${res.status}`);
 	return res.json();
 }
 

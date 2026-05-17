@@ -154,6 +154,7 @@ async def broker_listener():
             log.info("Připojuji se k brokeru: %s", BROKER_URI)
             async with websockets.connect(
                 BROKER_URI,
+                max_size=2**30,
                 max_queue=None,
                 compression=None,
                 ping_interval=None,

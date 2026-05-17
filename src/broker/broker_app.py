@@ -215,7 +215,7 @@ def main():
         port=args.port,
         ws_ping_interval=None,
         ws_ping_timeout=None,
-        ws_max_size=2**26,
+        ws_max_size=2**30,
     )
 
 

@@ -31,6 +31,7 @@ class BrokerClient:
             try:
                 async with websockets.connect(
                     self._uri,
+                    max_size=2**30,
                     max_queue=None,
                     compression=None,
                     ping_interval=None,

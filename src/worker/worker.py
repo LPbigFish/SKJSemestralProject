@@ -191,6 +191,7 @@ async def worker_loop(broker_uri: str, gateway_url: str):
     try:
         async with websockets.connect(
             broker_uri,
+            max_size=2**30,
             max_queue=None,
             compression=None,
             ping_interval=None,

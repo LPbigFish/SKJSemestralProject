@@ -4,31 +4,31 @@
 	interface ServiceStatus {
 		name: string;
 		port: number;
-		proxyPath: string;
+		healthUrl: string;
 		healthy: boolean | null;
 		info: Record<string, unknown> | null;
 	}
 
 	let services = $state.raw<ServiceStatus[]>([
-		{ name: 'S3 Gateway', port: 8080, proxyPath: '/api', healthy: null, info: null },
+		{ name: 'S3 Gateway', port: 8080, healthUrl: '/api/', healthy: null, info: null },
 		{
 			name: 'Haystack Node',
 			port: 8081,
-			proxyPath: '/haystack/api',
+			healthUrl: '/haystack/api/health',
 			healthy: null,
 			info: null
 		},
 		{
 			name: 'Message Broker',
 			port: 8082,
-			proxyPath: '/services/broker/api',
+			healthUrl: '/services/broker/api/health',
 			healthy: null,
 			info: null
 		},
 		{
 			name: 'Worker',
 			port: 8083,
-			proxyPath: '/services/worker/api',
+			healthUrl: '/services/worker/api/health',
 			healthy: null,
 			info: null
 		}
@@ -42,7 +42,7 @@
 		const updated = [...services];
 		for (let i = 0; i < updated.length; i++) {
 			try {
-				const res = await fetch(`${updated[i].proxyPath}/health`);
+				const res = await fetch(updated[i].healthUrl);
 				updated[i] = {
 					...updated[i],
 					healthy: res.ok,

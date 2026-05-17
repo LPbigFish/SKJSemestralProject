@@ -34,6 +34,11 @@ export interface BucketResponse {
 	created_at: string;
 }
 
+export interface BucketListResponse {
+	buckets: BucketResponse[];
+	total: number;
+}
+
 export interface BucketObjectListResponse {
 	bucket_id: number;
 	files: FileMetadata[];

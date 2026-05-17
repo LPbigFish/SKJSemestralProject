@@ -221,7 +221,7 @@
 					{#if expandedJobsFor === file.id}
 						<tr>
 							<td colspan="6" class="px-3 py-2">
-								<JobStatus {bucketId} fileId={file.id} {userId} />
+								<JobStatus {bucketId} fileId={file.id} {userId} initialExpanded={true} />
 							</td>
 						</tr>
 					{/if}
