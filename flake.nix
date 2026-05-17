@@ -45,6 +45,7 @@
               numpy
               pillow
               aiohttp
+              httpx
             ]
           );
         in
@@ -54,6 +55,7 @@
               python
               pkgs.sqlite
               pkgs.pyright
+              pkgs.bun
             ];
           };
         };

@@ -1,15 +1,13 @@
 import json
 import asyncio
+import sys
 import threading
-import time
 
 import pytest
 import uvicorn
 import websockets
 
-from repository.db import get_sync_session
-from repository.repo import QueuedMessage
-from sqlalchemy import select
+from conftest import wait_for_ready
 
 HOST = "127.0.0.1"
 PORT = 18765
@@ -18,9 +16,8 @@ WS_OPTS = {"max_queue": None, "compression": None, "ping_interval": None, "ping_
 
 
 def _run_server():
-    import sys
     sys.path.insert(0, "src")
-    from main import app
+    from broker.broker_app import app
     uvicorn.run(app, host=HOST, port=PORT, log_level="error",
                 ws_ping_interval=None, ws_ping_timeout=None)
 
@@ -29,7 +26,7 @@ def _run_server():
 def server():
     t = threading.Thread(target=_run_server, daemon=True)
     t.start()
-    time.sleep(1.0)
+    wait_for_ready(f"http://{HOST}:{PORT}/health")
     yield
 
 
@@ -100,6 +97,10 @@ async def test_ack_marks_delivered():
 
     await asyncio.sleep(0.2)
 
+    from repository.db import get_sync_session
+    from repository.repo import QueuedMessage
+    from sqlalchemy import select
+
     session = get_sync_session()
     try:
         queued = session.execute(
@@ -108,3 +109,25 @@ async def test_ack_marks_delivered():
         assert queued.is_delivered is True
     finally:
         session.close()
+
+
+@pytest.mark.asyncio
+async def test_pending_messages_delivered_on_subscribe():
+    async with websockets.connect(URI, **WS_OPTS) as pub: # type: ignore
+        await pub.send(
+            json.dumps(
+                {"action": "publish", "topic": "pending_test", "payload": {"val": 42}}
+            )
+        )
+
+    await asyncio.sleep(0.2)
+
+    async with websockets.connect(URI, **WS_OPTS) as sub: # type: ignore
+        await sub.send(json.dumps({"action": "subscribe", "topic": "pending_test"}))
+        resp = json.loads(await sub.recv())
+        assert resp["action"] == "subscribed"
+
+        resp = json.loads(await sub.recv())
+        assert resp["action"] == "deliver"
+        assert resp["topic"] == "pending_test"
+        assert resp["payload"] == {"val": 42}

@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -25,17 +26,22 @@ import pytest
 import uvicorn
 import websockets
 
+from conftest import wait_for_ready
+
 # ── Konfigurace testovacího serveru ───────────────────────────────────────────
 
 HAYSTACK_HOST = "127.0.0.1"
 HAYSTACK_PORT = 18770
 HAYSTACK_URL = f"http://{HAYSTACK_HOST}:{HAYSTACK_PORT}"
 
-# Broker (hlavní gateway) – musí běžet pro integrační testy ACK toku
+# Broker – standalone na vlastním portu
 BROKER_HOST = "127.0.0.1"
-BROKER_PORT = 18771
+BROKER_PORT = 18772
 BROKER_URI = f"ws://{BROKER_HOST}:{BROKER_PORT}/broker"
-GATEWAY_URL = f"http://{BROKER_HOST}:{BROKER_PORT}"
+
+# Gateway – na vlastním portu
+GATEWAY_PORT = 18771
+GATEWAY_URL = f"http://{BROKER_HOST}:{GATEWAY_PORT}"
 
 WS_OPTS = {
     "max_queue": None,
@@ -44,29 +50,30 @@ WS_OPTS = {
     "ping_timeout": None,
 }
 
-# Dočasná složka pro volume soubory – izolovaná pro každý test run
-_TEST_VOLUME_DIR: Path = Path(tempfile.mkdtemp(prefix="haystack_test_"))
+_TEST_VOLUME_DIR: Path | None = None
 
 
-# ── Spuštění Haystack Node v threadu ─────────────────────────────────────────
+# ── Spuštění serverů v threadech ─────────────────────────────────────────────
+
+def _run_broker():
+    sys.path.insert(0, "src")
+    from broker.broker_app import app
+    uvicorn.run(app, host=BROKER_HOST, port=BROKER_PORT, log_level="error",
+                ws_ping_interval=None, ws_ping_timeout=None)
+
 
 def _run_haystack_server():
-    import sys
-    # Přidáme složku src/haystack (tam kde leží haystack_node.py) do sys.path
     haystack_path = str(Path(__file__).resolve().parent.parent / "src" / "haystack")
     if haystack_path not in sys.path:
         sys.path.insert(0, haystack_path)
 
     import haystack_node as hn  # type: ignore[import-unresolved]
 
-    # Nastavíme globální proměnné PŘÍMO na modulu – musí být před uvicorn.run
-    # protože startup event čte tyto hodnoty při inicializaci
     hn.BROKER_URI = BROKER_URI
     hn.GATEWAY_URL = GATEWAY_URL
     hn.VOLUME_DIR = _TEST_VOLUME_DIR
-    hn.MAX_VOLUME_BYTES = 1 * 1024 * 1024  # 1 MB – malý limit pro test rotace
+    hn.MAX_VOLUME_BYTES = 1 * 1024 * 1024
 
-    # Také resetujeme stav svazků aby testy byly izolované
     hn._current_volume_id = 1
     hn._current_file = None
 
@@ -79,15 +86,10 @@ def _run_haystack_server():
 
 
 def _run_gateway_server():
-    import sys
-    project_root = str(Path(__file__).resolve().parent.parent)
     src_path = str(Path(__file__).resolve().parent.parent / "src")
-    for p in [src_path, project_root]:
-        if p not in sys.path:
-            sys.path.insert(0, p)
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
 
-    # Nastavíme BROKER_URI na modulu files PŘED spuštěním serveru,
-    # aby storage_ack_listener použil testovací broker místo localhost:8080
     from endpoints import files as files_module
     files_module.BROKER_URI = BROKER_URI
     files_module.HAYSTACK_URL = HAYSTACK_URL
@@ -96,7 +98,7 @@ def _run_gateway_server():
     uvicorn.run(
         app,
         host=BROKER_HOST,
-        port=BROKER_PORT,
+        port=GATEWAY_PORT,
         log_level="error",
         ws_ping_interval=None,
         ws_ping_timeout=None,
@@ -105,19 +107,25 @@ def _run_gateway_server():
 
 @pytest.fixture(scope="module", autouse=True)
 def servers():
-    """Spustí Haystack Node a S3 Gateway v daemon threadech."""
+    global _TEST_VOLUME_DIR
+    _TEST_VOLUME_DIR = Path(tempfile.mkdtemp(prefix="haystack_test_"))
+
+    t_broker = threading.Thread(target=_run_broker, daemon=True)
+    t_broker.start()
+    wait_for_ready(f"http://{BROKER_HOST}:{BROKER_PORT}/health")
+
     gw_thread = threading.Thread(target=_run_gateway_server, daemon=True)
     gw_thread.start()
-    time.sleep(1.0)
+    wait_for_ready(f"http://{BROKER_HOST}:{GATEWAY_PORT}/")
 
     hs_thread = threading.Thread(target=_run_haystack_server, daemon=True)
     hs_thread.start()
-    time.sleep(1.5)
+    wait_for_ready(f"{HAYSTACK_URL}/health")
 
     yield
 
-    # Úklid volume souborů po všech testech
-    shutil.rmtree(_TEST_VOLUME_DIR, ignore_errors=True)
+    if _TEST_VOLUME_DIR:
+        shutil.rmtree(_TEST_VOLUME_DIR, ignore_errors=True)
 
 
 # ── Pomocné funkce ────────────────────────────────────────────────────────────

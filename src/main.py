@@ -10,20 +10,20 @@ from fastapi import FastAPI
 
 from endpoints.files import files_router, storage_ack_listener
 from endpoints.buckets import buckets_router
-from endpoints.broker import broker_router
 from endpoints.process import process_router
+from endpoints.broker_client import init_broker_client
+import endpoints.files as _files
 
 app = FastAPI(title="S3 Gateway")
 
 app.include_router(files_router)
 app.include_router(buckets_router)
-app.include_router(broker_router)
 app.include_router(process_router)
 
 
 @app.on_event("startup")
 async def startup():
-    """Spustí ACK listener jako asyncio task na pozadí."""
+    await init_broker_client(_files.BROKER_URI)
     asyncio.create_task(storage_ack_listener())
 
 

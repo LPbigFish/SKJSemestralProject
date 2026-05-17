@@ -40,7 +40,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Konfigurace (lze přepsat CLI argumenty) ──────────────────────────────────
-BROKER_URI: str = "ws://localhost:8080/broker"
+BROKER_URI: str = "ws://localhost:8082/broker"
 GATEWAY_URL: str = "http://localhost:8080"
 VOLUME_DIR: Path = Path("haystack_volumes")
 MAX_VOLUME_BYTES: int = 100 * 1024 * 1024  # 100 MB
@@ -434,7 +434,7 @@ def main():
     parser = argparse.ArgumentParser(description="Haystack Storage Node")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8081)
-    parser.add_argument("--broker-uri", default="ws://localhost:8080/broker")
+    parser.add_argument("--broker-uri", default="ws://localhost:8082/broker")
     parser.add_argument("--gateway-url", default="http://localhost:8080")
     parser.add_argument("--volume-dir", default="haystack_volumes")
     parser.add_argument(

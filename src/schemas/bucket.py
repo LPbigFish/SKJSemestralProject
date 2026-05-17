@@ -12,3 +12,8 @@ class BucketResponse(BaseModel):
     created_at: datetime = Field(..., description="Čas vytvoření bucketu")
 
     model_config = {"from_attributes": True}
+
+
+class BucketListResponse(BaseModel):
+    buckets: list[BucketResponse]
+    total: int

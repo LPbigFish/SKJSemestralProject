@@ -1,14 +1,12 @@
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from endpoints.broker import _store_message_sync, manager
+from endpoints.broker_client import get_broker_client
 from repository.db import get_db
 from repository.repo import Bucket, FileRecord, ProcessingJob
-from schemas.broker import DeliverMessage
 
 process_router = APIRouter(prefix="/buckets")
 
@@ -82,11 +80,12 @@ async def process_object(
             FileRecord.id == file_id,
             FileRecord.bucket_id == bucket_id,
             FileRecord.is_deleted == False,
+            FileRecord.status == "ready",
         )
         .first()
     )
     if not record:
-        raise HTTPException(status_code=404, detail="Objekt nenalezen")
+        raise HTTPException(status_code=404, detail="Objekt nenalezen nebo ještě nahráván")
 
     user_id = x_user_id or "default_user"
 
@@ -118,12 +117,7 @@ async def process_object(
     payload["job_id"] = job_id
     db.commit()
 
-    msg_id = await run_in_threadpool(_store_message_sync, "image.jobs", payload)
-
-    deliver = DeliverMessage(
-        topic="image.jobs", message_id=msg_id, payload=payload
-    )
-    await manager.broadcast(deliver.model_dump(), "image.jobs")
+    await get_broker_client().publish("image.jobs", payload)
 
     return ProcessResponse(status="processing_started")
 

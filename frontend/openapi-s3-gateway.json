@@ -1,0 +1,1190 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "S3 Gateway",
+        "version": "0.1.0"
+    },
+    "paths": {
+        "/files/": {
+            "get": {
+                "summary": "Get Files",
+                "operationId": "get_files_files__get",
+                "parameters": [
+                    {
+                        "name": "x-user-id",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-User-Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FileListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/files/{file_id}": {
+            "get": {
+                "summary": "Get Specific File",
+                "operationId": "get_specific_file_files__file_id__get",
+                "parameters": [
+                    {
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "File Id"
+                        }
+                    },
+                    {
+                        "name": "x-user-id",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-User-Id"
+                        }
+                    },
+                    {
+                        "name": "x-internal-source",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Internal-Source"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete Specific File",
+                "operationId": "delete_specific_file_files__file_id__delete",
+                "parameters": [
+                    {
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "File Id"
+                        }
+                    },
+                    {
+                        "name": "x-user-id",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-User-Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DeleteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/files/upload": {
+            "post": {
+                "summary": "Create File",
+                "description": "P\u0159ijme soubor, ulo\u017e\u00ed metadata se statusem \"uploading\" a ode\u0161le\nbin\u00e1rn\u00ed data do Haystack Node p\u0159es broker (topic: storage.write).\nVr\u00e1t\u00ed 202 Accepted \u2013 soubor JE\u0160T\u011a NEN\u00cd fyzicky ulo\u017een.",
+                "operationId": "create_file_files_upload_post",
+                "parameters": [
+                    {
+                        "name": "x-user-id",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-User-Id"
+                        }
+                    },
+                    {
+                        "name": "x-internal-source",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Internal-Source"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/Body_create_file_files_upload_post"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CreateFile"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/files/internal/volume/{volume_id}/objects": {
+            "get": {
+                "summary": "Get Volume Objects",
+                "description": "Vr\u00e1t\u00ed seznam v\u0161ech nesmazan\u00fdch objekt\u016f ulo\u017een\u00fdch v dan\u00e9m svazku.\nPou\u017e\u00edv\u00e1 compact.py / Haystack Node p\u0159i kompakci.",
+                "operationId": "get_volume_objects_files_internal_volume__volume_id__objects_get",
+                "parameters": [
+                    {
+                        "name": "volume_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Volume Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/files/internal/bulk-update-location": {
+            "post": {
+                "summary": "Bulk Update Location",
+                "description": "Hromadn\u011b aktualizuje haystack_offset (a p\u0159\u00edpadn\u011b volume_id) po kompakci.\nVstup: {\"updates\": [{\"object_id\": \"...\", \"volume_id\": 1, \"new_offset\": 0, \"new_size\": 1024}]}",
+                "operationId": "bulk_update_location_files_internal_bulk_update_location_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "additionalProperties": true,
+                                "type": "object",
+                                "title": "Body"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/buckets/": {
+            "post": {
+                "summary": "Create Bucket",
+                "operationId": "create_bucket_buckets__post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BucketCreate"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BucketResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/buckets/{bucket_id}/objects/": {
+            "get": {
+                "summary": "List Bucket Objects",
+                "operationId": "list_bucket_objects_buckets__bucket_id__objects__get",
+                "parameters": [
+                    {
+                        "name": "bucket_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Bucket Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BucketObjectListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/buckets/{bucket_id}/billing/": {
+            "get": {
+                "summary": "Get Bucket Billing",
+                "operationId": "get_bucket_billing_buckets__bucket_id__billing__get",
+                "parameters": [
+                    {
+                        "name": "bucket_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Bucket Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BillingResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/buckets/operations": {
+            "get": {
+                "summary": "Get Operations",
+                "operationId": "get_operations_buckets_operations_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/OperationInfo"
+                                    },
+                                    "type": "array",
+                                    "title": "Response Get Operations Buckets Operations Get"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/buckets/{bucket_id}/objects/{file_id}/process": {
+            "post": {
+                "summary": "Process Object",
+                "operationId": "process_object_buckets__bucket_id__objects__file_id__process_post",
+                "parameters": [
+                    {
+                        "name": "bucket_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Bucket Id"
+                        }
+                    },
+                    {
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "File Id"
+                        }
+                    },
+                    {
+                        "name": "x-user-id",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-User-Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProcessRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProcessResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/buckets/internal/jobs/{job_id}": {
+            "put": {
+                "summary": "Update Job Status",
+                "operationId": "update_job_status_buckets_internal_jobs__job_id__put",
+                "parameters": [
+                    {
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Job Id"
+                        }
+                    },
+                    {
+                        "name": "x-internal-source",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Internal-Source"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/JobUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/buckets/{bucket_id}/objects/{file_id}/results": {
+            "get": {
+                "summary": "Get Processing Results",
+                "operationId": "get_processing_results_buckets__bucket_id__objects__file_id__results_get",
+                "parameters": [
+                    {
+                        "name": "bucket_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "title": "Bucket Id"
+                        }
+                    },
+                    {
+                        "name": "file_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "File Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/JobResultList"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/": {
+            "get": {
+                "summary": "Info",
+                "operationId": "info__get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "BillingResponse": {
+                "properties": {
+                    "bucket_id": {
+                        "type": "integer",
+                        "title": "Bucket Id",
+                        "description": "ID bucketu"
+                    },
+                    "bucket_name": {
+                        "type": "string",
+                        "title": "Bucket Name",
+                        "description": "N\u00e1zev bucketu"
+                    },
+                    "bandwidth_bytes": {
+                        "type": "integer",
+                        "title": "Bandwidth Bytes",
+                        "description": "Celkov\u00e9 p\u0159enesen\u00e9 bajty (legacy)"
+                    },
+                    "current_storage_bytes": {
+                        "type": "integer",
+                        "title": "Current Storage Bytes",
+                        "description": "Aktu\u00e1ln\u00ed \u00falo\u017ei\u0161t\u011b v bajtech"
+                    },
+                    "ingress_bytes": {
+                        "type": "integer",
+                        "title": "Ingress Bytes",
+                        "description": "P\u0159\u00edchoz\u00ed p\u0159enosy v bajtech"
+                    },
+                    "egress_bytes": {
+                        "type": "integer",
+                        "title": "Egress Bytes",
+                        "description": "Odchoz\u00ed p\u0159enosy v bajtech"
+                    },
+                    "internal_transfer_bytes": {
+                        "type": "integer",
+                        "title": "Internal Transfer Bytes",
+                        "description": "Intern\u00ed p\u0159enosy v bajtech"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "bucket_id",
+                    "bucket_name",
+                    "bandwidth_bytes",
+                    "current_storage_bytes",
+                    "ingress_bytes",
+                    "egress_bytes",
+                    "internal_transfer_bytes"
+                ],
+                "title": "BillingResponse"
+            },
+            "Body_create_file_files_upload_post": {
+                "properties": {
+                    "bucket_id": {
+                        "type": "integer",
+                        "title": "Bucket Id"
+                    },
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "title": "File"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "bucket_id",
+                    "file"
+                ],
+                "title": "Body_create_file_files_upload_post"
+            },
+            "BucketCreate": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "title": "Name",
+                        "description": "N\u00e1zev bucketu"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "name"
+                ],
+                "title": "BucketCreate"
+            },
+            "BucketObjectListResponse": {
+                "properties": {
+                    "bucket_id": {
+                        "type": "integer",
+                        "title": "Bucket Id",
+                        "description": "ID bucketu"
+                    },
+                    "files": {
+                        "items": {
+                            "$ref": "#/components/schemas/FileMetadata"
+                        },
+                        "type": "array",
+                        "title": "Files",
+                        "description": "Seznam objekt\u016f v bucketu"
+                    },
+                    "total": {
+                        "type": "integer",
+                        "title": "Total",
+                        "description": "Celkov\u00fd po\u010det objekt\u016f"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "bucket_id",
+                    "files",
+                    "total"
+                ],
+                "title": "BucketObjectListResponse"
+            },
+            "BucketResponse": {
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "title": "Id",
+                        "description": "ID bucketu"
+                    },
+                    "name": {
+                        "type": "string",
+                        "title": "Name",
+                        "description": "N\u00e1zev bucketu"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "title": "Created At",
+                        "description": "\u010cas vytvo\u0159en\u00ed bucketu"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "created_at"
+                ],
+                "title": "BucketResponse"
+            },
+            "CreateFile": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id",
+                        "description": "Unik\u00e1tn\u00ed ID souboru"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "title": "Filename",
+                        "description": "P\u016fvodn\u00ed n\u00e1zev souboru"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "title": "Size",
+                        "description": "Velikost souboru v bytech"
+                    },
+                    "content_type": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Content Type",
+                        "description": "MIME typ souboru"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "filename",
+                    "size"
+                ],
+                "title": "CreateFile"
+            },
+            "DeleteResponse": {
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "title": "Message",
+                        "description": "Zpr\u00e1va o v\u00fdsledku operace"
+                    },
+                    "id": {
+                        "type": "string",
+                        "title": "Id",
+                        "description": "ID smazan\u00e9ho souboru"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "message",
+                    "id"
+                ],
+                "title": "DeleteResponse"
+            },
+            "FileListResponse": {
+                "properties": {
+                    "files": {
+                        "items": {
+                            "$ref": "#/components/schemas/FileMetadata"
+                        },
+                        "type": "array",
+                        "title": "Files",
+                        "description": "Seznam soubor\u016f u\u017eivatele"
+                    },
+                    "total": {
+                        "type": "integer",
+                        "title": "Total",
+                        "description": "Celkov\u00fd po\u010det soubor\u016f"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "files",
+                    "total"
+                ],
+                "title": "FileListResponse"
+            },
+            "FileMetadata": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id",
+                        "description": "Unik\u00e1tn\u00ed ID souboru"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "title": "Filename",
+                        "description": "P\u016fvodn\u00ed n\u00e1zev souboru"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "title": "Size",
+                        "description": "Velikost souboru v bytech"
+                    },
+                    "content_type": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Content Type",
+                        "description": "MIME typ souboru"
+                    },
+                    "created_at": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "date-time"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ],
+                        "title": "Created At",
+                        "description": "\u010cas vytvo\u0159en\u00ed souboru"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "filename",
+                    "size",
+                    "created_at"
+                ],
+                "title": "FileMetadata"
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "JobResult": {
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "title": "Id"
+                    },
+                    "operation": {
+                        "type": "string",
+                        "title": "Operation"
+                    },
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    },
+                    "result_file_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Result File Id"
+                    },
+                    "error": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Error"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "title": "Created At"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "title": "Updated At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "operation",
+                    "status",
+                    "created_at",
+                    "updated_at"
+                ],
+                "title": "JobResult"
+            },
+            "JobResultList": {
+                "properties": {
+                    "jobs": {
+                        "items": {
+                            "$ref": "#/components/schemas/JobResult"
+                        },
+                        "type": "array",
+                        "title": "Jobs"
+                    },
+                    "total": {
+                        "type": "integer",
+                        "title": "Total"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "jobs",
+                    "total"
+                ],
+                "title": "JobResultList"
+            },
+            "JobUpdateRequest": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    },
+                    "result_file_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Result File Id"
+                    },
+                    "error": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Error"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status"
+                ],
+                "title": "JobUpdateRequest"
+            },
+            "OperationInfo": {
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "title": "Operation"
+                    },
+                    "params": {
+                        "items": {
+                            "$ref": "#/components/schemas/OperationParam"
+                        },
+                        "type": "array",
+                        "title": "Params"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "operation",
+                    "params"
+                ],
+                "title": "OperationInfo"
+            },
+            "OperationParam": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "title": "Name"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Type"
+                    },
+                    "required": {
+                        "type": "boolean",
+                        "title": "Required"
+                    },
+                    "default": {
+                        "anyOf": [
+                            {},
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Default"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "name",
+                    "type",
+                    "required"
+                ],
+                "title": "OperationParam"
+            },
+            "ProcessRequest": {
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "title": "Operation"
+                    },
+                    "params": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Params"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "operation"
+                ],
+                "title": "ProcessRequest"
+            },
+            "ProcessResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status"
+                ],
+                "title": "ProcessResponse"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}

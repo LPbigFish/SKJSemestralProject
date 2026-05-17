@@ -27,10 +27,9 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from endpoints.broker import _store_message_sync, manager
+from endpoints.broker_client import get_broker_client
 from repository.db import get_db, get_sync_session
 from repository.repo import Bucket, FileRecord
-from schemas.broker import DeliverMessage
 from schemas.create_file import CreateFile
 from schemas.delete_response import DeleteResponse
 from schemas.file_list_response import FileListResponse
@@ -46,7 +45,7 @@ import os
 # URL Haystack Node a Broker – konfigurovatelné přes env proměnné
 # (testy přepisují tyto hodnoty přímo na modulu před spuštěním serveru)
 HAYSTACK_URL: str = os.environ.get("HAYSTACK_URL", "http://localhost:8081")
-BROKER_URI: str = os.environ.get("BROKER_URI", "ws://localhost:8080/broker")
+BROKER_URI: str = os.environ.get("BROKER_URI", "ws://localhost:8082/broker")
 
 
 # ── Pozadí: ACK listener ──────────────────────────────────────────────────────
@@ -92,10 +91,14 @@ async def storage_ack_listener():
                     if action == "deliver":
                         message_id = msg.get("message_id")
                         payload = msg.get("payload", {})
-                        await _process_ack(payload)
-                        # Potvrdit doručení
-                        ack_msg: bytes = msgpack.packb({"action": "ack", "message_id": message_id})  # type: ignore[assignment]
-                        await ws.send(ack_msg)
+                        try:
+                            ok = await _process_ack(payload)
+                        except Exception as e:
+                            log.error("ACK listener: výjimka v _process_ack: %s", e)
+                            ok = False
+                        if ok:
+                            ack_msg: bytes = msgpack.packb({"action": "ack", "message_id": message_id})  # type: ignore[assignment]
+                            await ws.send(ack_msg)
 
         except (websockets.ConnectionClosed, ConnectionRefusedError, OSError) as e:
             log.warning("ACK listener: broker nedostupný (%s), zkouším za %ds", e, reconnect_delay)
@@ -103,8 +106,8 @@ async def storage_ack_listener():
             reconnect_delay = min(reconnect_delay * 2, 30)
 
 
-async def _process_ack(payload: dict):
-    """Zpracuje jedno ACK potvrzení od Haystack Node."""
+async def _process_ack(payload: dict) -> bool:
+    """Zpracuje jedno ACK potvrzení od Haystack Node. Vrací True při úspěchu."""
     object_id = payload.get("object_id")
     volume_id = payload.get("volume_id")
     offset = payload.get("offset")
@@ -112,16 +115,17 @@ async def _process_ack(payload: dict):
 
     if not all(v is not None for v in [object_id, volume_id, offset, size]):
         log.error("Neúplné ACK: %s", payload)
-        return
+        return False
 
-    # Po kontrole výše jsou všechny hodnoty zaručeně not None
-    # – explicitní assert pro type checker
     assert object_id is not None
     assert volume_id is not None
     assert offset is not None
     assert size is not None
 
+    success = False
+
     def _update_db():
+        nonlocal success
         db = get_sync_session()
         try:
             record = db.query(FileRecord).filter(FileRecord.id == object_id).first()
@@ -137,12 +141,13 @@ async def _process_ack(payload: dict):
             record.haystack_size = size
             record.status = "ready"
 
-            # Billing: zaúčtuj storage bytes při potvrzení uložení
             bucket = db.query(Bucket).filter(Bucket.id == record.bucket_id).first()
             if bucket:
                 bucket.current_storage_bytes += size
+                bucket.ingress_bytes += size
 
             db.commit()
+            success = True
             log.info("ACK zpracován: object_id=%s → volume=%d offset=%d size=%d", object_id, volume_id, offset, size)
         except Exception as e:
             db.rollback()
@@ -151,6 +156,7 @@ async def _process_ack(payload: dict):
             db.close()
 
     await run_in_threadpool(_update_db)
+    return success
 
 
 # ── Veřejné endpointy ─────────────────────────────────────────────────────────
@@ -202,7 +208,6 @@ async def get_specific_file(
     is_internal = x_internal_source and x_internal_source.lower() == "true"
     bucket = db.query(Bucket).filter(Bucket.id == record.bucket_id).first()
     if bucket:
-        bucket.bandwidth_bytes += record.size
         if is_internal:
             bucket.internal_transfer_bytes += record.size
         else:
@@ -305,14 +310,6 @@ async def create_file(
     )
     db.add(record)
 
-    # Billing ingress (zaúčtuje se přijetí dat, storage až po ACK)
-    is_internal = x_internal_source and x_internal_source.lower() == "true"
-    bucket.bandwidth_bytes += size
-    if is_internal:
-        bucket.internal_transfer_bytes += size
-    else:
-        bucket.ingress_bytes += size
-
     db.commit()
     db.refresh(record)
 
@@ -321,9 +318,7 @@ async def create_file(
         "object_id": file_id,
         "data": list(data),   # msgpack přenese jako bytes array
     }
-    msg_id = await run_in_threadpool(_store_message_sync, "storage.write", payload)
-    deliver = DeliverMessage(topic="storage.write", message_id=msg_id, payload=payload)
-    await manager.broadcast(deliver.model_dump(), "storage.write")
+    await get_broker_client().publish("storage.write", payload)
 
     return CreateFile(
         id=record.id,

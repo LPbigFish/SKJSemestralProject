@@ -1,0 +1,203 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Haystack Storage Node",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/volume/{volume_id}/{offset}/{size}": {
+      "get": {
+        "summary": "Read Needle",
+        "description": "P\u0159e\u010dte p\u0159esn\u011b `size` bajt\u016f ze souboru volume_{volume_id}.dat\nza\u010d\u00ednaje od pozice `offset`.\n\nPou\u017e\u00edv\u00e1 se intern\u011b S3 Gateway p\u0159i stahov\u00e1n\u00ed soubor\u016f.",
+        "operationId": "read_needle_volume__volume_id___offset___size__get",
+        "parameters": [
+          {
+            "name": "volume_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Volume Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "size",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Healthcheck endpoint.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/volumes": {
+      "get": {
+        "summary": "List Volumes",
+        "description": "Vr\u00e1t\u00ed seznam v\u0161ech svazk\u016f a jejich velikost\u00ed.",
+        "operationId": "list_volumes_volumes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/compact/{volume_id}": {
+      "post": {
+        "summary": "Compact Volume",
+        "description": "Spust\u00ed kompakci svazku volume_{volume_id}.dat.\nTento endpoint m\u016f\u017ee b\u00fdt vol\u00e1n z compact.py nebo p\u0159\u00edmo.\n\ngateway_url: p\u0159ep\u00ed\u0161e glob\u00e1ln\u00ed GATEWAY_URL (voliteln\u00e9)",
+        "operationId": "compact_volume_compact__volume_id__post",
+        "parameters": [
+          {
+            "name": "volume_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Volume Id"
+            }
+          },
+          {
+            "name": "gateway_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Gateway Url"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

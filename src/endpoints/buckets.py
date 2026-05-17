@@ -3,12 +3,21 @@ from sqlalchemy.orm import Session
 
 from repository.db import get_db
 from repository.repo import Bucket, FileRecord
-from schemas.bucket import BucketCreate, BucketResponse
+from schemas.bucket import BucketCreate, BucketResponse, BucketListResponse
 from schemas.bucket_object_list import BucketObjectListResponse
 from schemas.file_metadata import FileMetadata
 from schemas.billing import BillingResponse
 
 buckets_router = APIRouter(prefix="/buckets")
+
+@buckets_router.get("/", response_model=BucketListResponse, status_code=200)
+def list_buckets(db: Session = Depends(get_db)):
+    buckets = db.query(Bucket).order_by(Bucket.id).all()
+    return BucketListResponse(
+        buckets=[BucketResponse.model_validate(b) for b in buckets],
+        total=len(buckets),
+    )
+
 
 @buckets_router.post("/", response_model=BucketResponse, status_code=201)
 def create_bucket(bucket_data: BucketCreate, db: Session = Depends(get_db)):
@@ -58,6 +67,10 @@ def get_bucket_billing(bucket_id: int, db: Session = Depends(get_db)):
     bucket = db.query(Bucket).filter(Bucket.id == bucket_id).first()
     if not bucket:
         raise HTTPException(status_code=404, detail="Bucket nenalezen")
+
+    total_bandwidth = bucket.ingress_bytes + bucket.egress_bytes + bucket.internal_transfer_bytes
+    bucket.bandwidth_bytes = total_bandwidth
+    db.commit()
 
     return BillingResponse(
         bucket_id=bucket.id,
