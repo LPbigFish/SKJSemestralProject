@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from repository.db import get_db
@@ -72,11 +73,19 @@ def get_bucket_billing(bucket_id: int, db: Session = Depends(get_db)):
     bucket.bandwidth_bytes = total_bandwidth
     db.commit()
 
+    storage_bytes = db.query(
+        func.coalesce(func.sum(FileRecord.size), 0)
+    ).filter(
+        FileRecord.bucket_id == bucket_id,
+        FileRecord.is_deleted == False,
+        FileRecord.status == "ready",
+    ).scalar()
+
     return BillingResponse(
         bucket_id=bucket.id,
         bucket_name=bucket.name,
         bandwidth_bytes=bucket.bandwidth_bytes,
-        current_storage_bytes=bucket.current_storage_bytes,
+        current_storage_bytes=storage_bytes,
         ingress_bytes=bucket.ingress_bytes,
         egress_bytes=bucket.egress_bytes,
         internal_transfer_bytes=bucket.internal_transfer_bytes,

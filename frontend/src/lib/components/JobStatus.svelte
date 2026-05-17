@@ -6,13 +6,17 @@
 	let {
 		bucketId,
 		fileId,
+		filename,
 		userId,
-		initialExpanded = false
+		initialExpanded = false,
+		onFinished
 	}: {
 		bucketId: number;
 		fileId: string;
+		filename: string;
 		userId: string;
 		initialExpanded?: boolean;
+		onFinished?: () => void;
 	} = $props();
 
 	let jobs = $state.raw<JobResult[]>([]);
@@ -71,7 +75,24 @@
 		loading = true;
 		try {
 			const res = await getProcessingResults(bucketId, fileId);
+			const hadActive = jobs.some(
+				(j) =>
+					j.status !== 'done' &&
+					j.status !== 'error' &&
+					j.status !== 'completed' &&
+					j.status !== 'failed'
+			);
 			jobs = res.jobs;
+			const nowActive = res.jobs.some(
+				(j) =>
+					j.status !== 'done' &&
+					j.status !== 'error' &&
+					j.status !== 'completed' &&
+					j.status !== 'failed'
+			);
+			if (hadActive && !nowActive && onFinished) {
+				onFinished();
+			}
 		} catch {
 			jobs = [];
 		} finally {
@@ -148,7 +169,8 @@
 						>
 							<div class="flex items-center gap-3">
 								<span class="font-mono text-xs text-gray-500">#{job.id}</span>
-								<span class="text-sm">{job.operation}</span>
+								<span class="text-sm font-medium text-gray-800">{filename}</span>
+								<span class="text-sm text-gray-500">{job.operation}</span>
 								<span
 									class="rounded-full px-2 py-0.5 text-xs font-medium {statusColor(job.status)}"
 								>
@@ -182,7 +204,8 @@
 									>
 										<div class="flex items-center gap-3">
 											<span class="font-mono text-xs text-gray-500">#{job.id}</span>
-											<span class="text-sm">{job.operation}</span>
+											<span class="text-sm font-medium text-gray-800">{filename}</span>
+											<span class="text-sm text-gray-500">{job.operation}</span>
 											<span
 												class="rounded-full px-2 py-0.5 text-xs font-medium {statusColor(
 													job.status
