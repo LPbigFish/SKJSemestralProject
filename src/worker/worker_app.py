@@ -26,14 +26,16 @@ log = logging.getLogger(__name__)
 
 BROKER_URI: str = "ws://localhost:8082/broker"
 GATEWAY_URL: str = "http://localhost:8080"
+DISABLE_WORKER_LOOP: bool = False
 
 app = FastAPI(title="Image Processing Worker")
 
 
 @app.on_event("startup")
 async def startup():
-    asyncio.create_task(worker_loop(BROKER_URI, GATEWAY_URL))
-    log.info("Worker spuštěn: broker=%s gateway=%s", BROKER_URI, GATEWAY_URL)
+    if not DISABLE_WORKER_LOOP:
+        asyncio.create_task(worker_loop(BROKER_URI, GATEWAY_URL))
+        log.info("Worker spuštěn: broker=%s gateway=%s", BROKER_URI, GATEWAY_URL)
 
 
 @app.get("/health")

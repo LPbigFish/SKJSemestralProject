@@ -86,6 +86,7 @@ def _run_worker_app():
 
     wa.BROKER_URI = BROKER_URI
     wa.GATEWAY_URL = GATEWAY_URL
+    wa.DISABLE_WORKER_LOOP = True
     uvicorn.run(wa.app, host=HOST, port=WORKER_APP_PORT, log_level="error")
 
 
