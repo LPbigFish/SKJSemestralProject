@@ -329,10 +329,9 @@ async def list_volumes():
 @app.post("/compact/{volume_id}")
 async def compact_volume(volume_id: int, gateway_url: Optional[str] = None):
     """
-    Spustí kompakci svazku volume_{volume_id}.dat.
-    Tento endpoint může být volán z compact.py nebo přímo.
-
-    gateway_url: přepíše globální GATEWAY_URL (volitelné)
+    Spustí kompakci jednoho svazku.
+    Odstraní smazaná data, zhustí zbývající objekty a přesune objekty
+    z následujících svazků, aby se vyplnilo uvolněné místo.
     """
     import aiohttp
 
@@ -341,36 +340,82 @@ async def compact_volume(volume_id: int, gateway_url: Optional[str] = None):
     if not src_path.exists():
         raise HTTPException(status_code=404, detail=f"Svazek {volume_id} neexistuje")
 
-    # Nechceme kompaktovat aktivní svazek (mohl by se právě zapisovat)
     if volume_id == _current_volume_id:
         raise HTTPException(
             status_code=409,
             detail="Nelze kompaktovat aktivní svazek. Nejprve proveď rotaci.",
         )
 
-    dst_path = VOLUME_DIR / f"volume_{volume_id}_compacted.dat"
-
-    # 1. Získáme seznam nesmazaných objektů z S3 Gateway pro tento svazek
     async with aiohttp.ClientSession() as session:
-        url = f"{gw_url}/files/internal/volume/{volume_id}/objects"
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Gateway vrátila chybu: HTTP {resp.status} {body}",
-                )
-            objects = await resp.json()  # list of {id, offset, size}
+        return await _compact_single_volume(session, volume_id, gw_url)
+
+
+async def _get_live_objects(session, volume_id: int, gw_url: str) -> list:
+    url = f"{gw_url}/files/internal/volume/{volume_id}/objects"
+    async with session.get(url) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Gateway vrátila chybu: HTTP {resp.status} {body}",
+            )
+        return await resp.json()
+
+
+async def _send_bulk_update(session, updates: list, gw_url: str):
+    url = f"{gw_url}/files/internal/bulk-update-location"
+    async with session.post(url, json={"updates": updates}) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Gateway odmítla aktualizaci offsetů: HTTP {resp.status} {body}",
+            )
+
+
+async def _purge_deleted(session, volume_id: int, gw_url: str) -> int:
+    url = f"{gw_url}/files/internal/purge-deleted/{volume_id}"
+    async with session.post(url) as resp:
+        if resp.status != 200:
+            log.warning("Purge deleted pro svazek %d selhal: HTTP %d", volume_id, resp.status)
+            return 0
+        data = await resp.json()
+        return data.get("purged", 0)
+
+
+async def _get_all_object_ids(session, volume_id: int, gw_url: str) -> list:
+    url = f"{gw_url}/files/internal/volume/{volume_id}/all-object-ids"
+    async with session.get(url) as resp:
+        if resp.status != 200:
+            return []
+        data = await resp.json()
+        return data.get("object_ids", [])
+
+
+async def _compact_single_volume(session, volume_id: int, gw_url: str) -> dict:
+    """Zkompatkuje jeden svazek interně – odstraní smazaná data, zhustí objekty."""
+    src_path = _volume_path(volume_id)
+    if not src_path.exists():
+        raise HTTPException(status_code=404, detail=f"Svazek {volume_id} neexistuje")
+
+    objects = await _get_live_objects(session, volume_id, gw_url)
 
     if not objects:
-        log.info("Svazek %d nemá žádné živé objekty, není co kompaktovat", volume_id)
+        remaining_ids = await _get_all_object_ids(session, volume_id, gw_url)
+        if not remaining_ids:
+            src_path.unlink(missing_ok=True)
+            await _purge_deleted(session, volume_id, gw_url)
+            log.info("Svazek %d je prázdný, smazán", volume_id)
+            return {"status": "empty_deleted", "volume_id": volume_id}
+        await _purge_deleted(session, volume_id, gw_url)
+        log.info("Svazek %d: žádné živé objekty, jen smazané záznamy vymazány", volume_id)
         return {"status": "nothing_to_compact", "volume_id": volume_id}
 
     log.info("Kompakce svazku %d: %d objektů", volume_id, len(objects))
 
-    # 2. Vytvoříme nový kompaktovaný soubor a přepíšeme objekty těsně za sebe
+    dst_path = VOLUME_DIR / f"volume_{volume_id}_compacted.dat"
     new_offset = 0
-    updates = []  # seznam {object_id, new_offset, new_size}
+    updates = []
 
     with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
         for obj in objects:
@@ -391,33 +436,22 @@ async def compact_volume(volume_id: int, gateway_url: Optional[str] = None):
             dst.write(data)
             updates.append({
                 "object_id": obj_id,
-                "volume_id": volume_id,   # volume_id zůstává stejné
+                "volume_id": volume_id,
                 "new_offset": new_offset,
                 "new_size": size,
             })
             new_offset += size
 
-    # 3. Odešleme na Gateway aktualizované offsety
-    async with aiohttp.ClientSession() as session:
-        url = f"{gw_url}/files/internal/bulk-update-location"
-        async with session.post(url, json={"updates": updates}) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                # Kompaktovaný soubor smažeme – offsety nejsou aktualizované
-                dst_path.unlink(missing_ok=True)
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Gateway odmítla aktualizaci offsetů: HTTP {resp.status} {body}",
-                )
+    await _send_bulk_update(session, updates, gw_url)
 
-    # 4. Nahradíme starý soubor kompaktovaným
     src_path.unlink()
     dst_path.rename(src_path)
+
+    await _purge_deleted(session, volume_id, gw_url)
+
     log.info(
-        "Kompakce svazku %d dokončena. Přesunuto %d objektů, ušetřeno ~%d B",
-        volume_id,
-        len(updates),
-        (src_path.stat().st_size if src_path.exists() else 0),
+        "Kompakce svazku %d dokončena. Přesunuto %d objektů, nová velikost: %d B",
+        volume_id, len(updates), src_path.stat().st_size,
     )
 
     return {
@@ -425,6 +459,130 @@ async def compact_volume(volume_id: int, gateway_url: Optional[str] = None):
         "volume_id": volume_id,
         "objects_moved": len(updates),
     }
+
+
+@app.post("/compact-all")
+async def compact_all(gateway_url: Optional[str] = None):
+    """
+    Spustí globální kompakci všech neaktivních svazků.
+    Projde svazky vzestupně, zkompatkuje každý interně a následně
+    přesune objekty z vyšších svazků do uvolněného místa.
+    Prázdné svazky po přesunu jsou odstraněny.
+    """
+    import aiohttp
+
+    gw_url = gateway_url or GATEWAY_URL
+    async with aiohttp.ClientSession() as session:
+        all_volumes = sorted([
+            int(p.stem.split("_")[1])
+            for p in VOLUME_DIR.glob("volume_*.dat")
+            if _volume_path(0).parent == VOLUME_DIR
+        ])
+        existing = sorted(VOLUME_DIR.glob("volume_*.dat"))
+        all_volumes = []
+        for p in existing:
+            try:
+                all_volumes.append(int(p.stem.split("_")[1]))
+            except (IndexError, ValueError):
+                pass
+
+        to_compact = [v for v in sorted(all_volumes) if v != _current_volume_id]
+        if not to_compact:
+            return {"status": "no_volumes", "details": []}
+
+        log.info("Globální kompakce: svazky %s (aktivní %d vynechán)", to_compact, _current_volume_id)
+
+        results = []
+
+        for vid in to_compact:
+            try:
+                result = await _compact_single_volume(session, vid, gw_url)
+                results.append(result)
+            except Exception as e:
+                log.error("Kompakce svazku %d selhala: %s", vid, e)
+                results.append({"status": "error", "volume_id": vid, "detail": str(e)})
+
+        await _merge_volumes_across(session, to_compact, gw_url)
+
+        return {"status": "done", "details": results}
+
+
+async def _merge_volumes_across(session, volume_ids: list, gw_url: str):
+    """
+    Presune objekty z vyšších svazků do nižších, aby se vyplnilo místo.
+    Projde svazky vzestupně a pro každý zkontroluje, zda je v něm volné místo.
+    Pokud ano, přesune objekty z následujících svazků.
+    """
+    sorted_vols = sorted(volume_ids)
+    for i, target_vid in enumerate(sorted_vols):
+        target_path = _volume_path(target_vid)
+        if not target_path.exists():
+            continue
+
+        target_size = target_path.stat().st_size
+        free_space = MAX_VOLUME_BYTES - target_size
+
+        if free_space <= 0:
+            continue
+
+        for j in range(i + 1, len(sorted_vols)):
+            source_vid = sorted_vols[j]
+            source_path = _volume_path(source_vid)
+            if not source_path.exists():
+                continue
+            if source_vid == _current_volume_id:
+                continue
+
+            source_objects = await _get_live_objects(session, source_vid, gw_url)
+            if not source_objects:
+                remaining_ids = await _get_all_object_ids(session, source_vid, gw_url)
+                if not remaining_ids:
+                    source_path.unlink(missing_ok=True)
+                    await _purge_deleted(session, source_vid, gw_url)
+                    log.info("Prázdný svazek %d odstraněn", source_vid)
+                continue
+
+            moved = 0
+            for obj in source_objects:
+                obj_size = obj["haystack_size"]
+                if obj_size > free_space:
+                    break
+
+                old_offset = obj["haystack_offset"]
+                with open(source_path, "rb") as sf:
+                    sf.seek(old_offset)
+                    data = sf.read(obj_size)
+                    if len(data) != obj_size:
+                        continue
+
+                with open(target_path, "ab") as tf:
+                    tf.seek(0, 2)
+                    new_offset = tf.tell()
+                    tf.write(data)
+
+                await _send_bulk_update(session, [{
+                    "object_id": obj["id"],
+                    "volume_id": target_vid,
+                    "new_offset": new_offset,
+                    "new_size": obj_size,
+                }], gw_url)
+
+                free_space -= obj_size
+                moved += 1
+
+            if moved > 0:
+                log.info(
+                    "Přesunuto %d objektů ze svazku %d do svazku %d",
+                    moved, source_vid, target_vid,
+                )
+
+                try:
+                    await _compact_single_volume(session, source_vid, gw_url)
+                except Exception as e:
+                    log.warning("Po přesunu: kompakce svazku %d selhala: %s", source_vid, e)
+
+            if free_space <= 0:
+                break
 
 
 # ── Vstupní bod ───────────────────────────────────────────────────────────────

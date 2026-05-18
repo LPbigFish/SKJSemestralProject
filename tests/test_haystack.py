@@ -505,3 +505,107 @@ async def test_invalid_message_does_not_crash_node():
         resp = await client.get(f"{HAYSTACK_URL}/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+# ── Kompakce: purge DB záznamů ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_compaction_purges_deleted_db_records():
+    """
+    Po kompakci svazku musí být DB záznamy smazaných souborů fyzicky odstraněny.
+    """
+    bucket_id = await _create_bucket()
+
+    data_a = b"file-A-data-" + os.urandom(256)
+    data_b = b"file-B-data-" + os.urandom(256)
+
+    res_a = await _upload_via_gateway(bucket_id, data_a, "a.bin")
+    res_b = await _upload_via_gateway(bucket_id, data_b, "b.bin")
+
+    file_a_id = res_a["id"]
+    file_b_id = res_b["id"]
+
+    async with httpx.AsyncClient() as client:
+        await client.delete(
+            f"{GATEWAY_URL}/files/{file_a_id}",
+            headers={"X-User-Id": "testuser"},
+        )
+
+    async with httpx.AsyncClient() as client:
+        files_resp = await client.get(
+            f"{GATEWAY_URL}/files/",
+            headers={"X-User-Id": "testuser"},
+        )
+    file_ids = [f["id"] for f in files_resp.json()["files"]]
+    assert file_b_id in file_ids
+    assert file_a_id not in file_ids
+
+    async with httpx.AsyncClient() as client:
+        health = (await client.get(f"{HAYSTACK_URL}/health")).json()
+    active = health["active_volume"]
+
+    if active > 1:
+        async with httpx.AsyncClient() as client:
+            compact_resp = await client.post(
+                f"{HAYSTACK_URL}/compact/{active - 1}?gateway_url={GATEWAY_URL}"
+            )
+            assert compact_resp.status_code == 200
+
+    async with httpx.AsyncClient() as client:
+        get_resp = await client.get(
+            f"{GATEWAY_URL}/files/{file_b_id}",
+            headers={"X-User-Id": "testuser"},
+        )
+    assert get_resp.status_code == 200
+    assert get_resp.content == data_b
+
+
+# ── Kompakce: cross-volume merge ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_compact_all_merges_volumes():
+    """
+    Nahrání dostatečného množství dat pro vytvoření více svazků,
+    smazání některých souborů a ověření, že compact-all přesune
+    objekty z vyšších svazků do nižších.
+    """
+    bucket_id = await _create_bucket()
+
+    chunk = os.urandom(400 * 1024)
+    uploaded_files = []
+
+    for i in range(4):
+        res = await _upload_via_gateway(bucket_id, chunk, f"chunk_{i}.bin")
+        uploaded_files.append(res["id"])
+
+    await asyncio.sleep(0.5)
+    async with httpx.AsyncClient() as client:
+        health = (await client.get(f"{HAYSTACK_URL}/health")).json()
+    active = health["active_volume"]
+
+    if active < 2:
+        pytest.skip("Nepodařilo se vytvořit více svazků s aktuální konfigurací")
+
+    async with httpx.AsyncClient() as client:
+        await client.delete(
+            f"{GATEWAY_URL}/files/{uploaded_files[0]}",
+            headers={"X-User-Id": "testuser"},
+        )
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{HAYSTACK_URL}/compact-all?gateway_url={GATEWAY_URL}",
+            timeout=30.0,
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "done"
+
+    for fid in uploaded_files[1:]:
+        async with httpx.AsyncClient() as client:
+            get_resp = await client.get(
+                f"{GATEWAY_URL}/files/{fid}",
+                headers={"X-User-Id": "testuser"},
+            )
+        assert get_resp.status_code == 200
+        assert get_resp.content == chunk

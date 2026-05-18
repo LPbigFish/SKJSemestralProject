@@ -19,10 +19,12 @@ Doporučené spouštění přes cron (každou noc ve 2:00):
 
 Algoritmus:
   1. Zeptá se S3 Gateway na seznam živých objektů pro daný svazek.
-  2. Zavolá Haystack Node POST /compact/{volume_id}, který:
-       - přepíše živá data do nového souboru bez mezer
-       - odešle zpět na Gateway aktualizované offsety
-       - smaže starý soubor
+  2. Zavolá Haystack Node POST /compact/{volume_id} nebo POST /compact-all:
+     --volume-id: kompaktuje jeden svazek interně (odstraní smazaná data, zhustí)
+     --all: provede globální kompakci – zkompatkuje každý svazek, pak přesune
+            objekty z vyšších svazků do uvolněného místa v nižších svazcích.
+            Prázdné svazky po přesunu jsou odstraněny. DB záznamy smazaných
+            souborů jsou vymazány.
 """
 
 import argparse
@@ -43,7 +45,6 @@ GATEWAY_URL = "http://localhost:8080"
 
 
 async def get_active_volume(haystack_url: str) -> int:
-    """Zjistí číslo aktuálně aktivního (zapisovaného) svazku."""
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{haystack_url}/health") as resp:
             if resp.status != 200:
@@ -53,7 +54,6 @@ async def get_active_volume(haystack_url: str) -> int:
 
 
 async def get_all_volumes(haystack_url: str) -> list[int]:
-    """Vrátí čísla všech existujících svazků."""
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{haystack_url}/volumes") as resp:
             if resp.status != 200:
@@ -63,10 +63,6 @@ async def get_all_volumes(haystack_url: str) -> list[int]:
 
 
 async def compact_volume(volume_id: int, haystack_url: str, gateway_url: str) -> dict:
-    """
-    Spustí kompakci jednoho svazku voláním Haystack Node endpointu.
-    Veškerá logika přepisování probíhá na straně Haystack Node.
-    """
     url = f"{haystack_url}/compact/{volume_id}?gateway_url={gateway_url}"
     log.info("Spouštím kompakci svazku %d …", volume_id)
 
@@ -88,27 +84,47 @@ async def compact_volume(volume_id: int, haystack_url: str, gateway_url: str) ->
                 return {"status": "error", "volume_id": volume_id, "detail": body}
 
 
+async def compact_all(haystack_url: str, gateway_url: str) -> dict:
+    """
+    Globální kompakce: zkompatkuje všechny svazky, přesune objekty mezi
+    svazky pro maximální zhutnění, odstraní prázdné svazky a vymaže
+    DB záznamy smazaných souborů.
+    """
+    url = f"{haystack_url}/compact-all?gateway_url={gateway_url}"
+    log.info("Spouštím globální kompakci (compact-all) …")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, timeout=aiohttp.ClientTimeout(total=3600)) as resp:
+            body = await resp.json()
+            if resp.status == 200:
+                details = body.get("details", [])
+                for d in details:
+                    log.info(
+                        "  Svazek %d: %s",
+                        d.get("volume_id", "?"),
+                        d.get("status", "?"),
+                    )
+                log.info("Globální kompakce dokončena")
+                return body
+            else:
+                log.error("Globální kompakce selhala: %s", body)
+                return {"status": "error", "detail": body}
+
+
 async def run(args):
     haystack_url = args.haystack_url
     gateway_url = args.gateway_url
 
     if args.all:
-        # Kompaktuj všechny svazky kromě aktivního
         try:
-            active = await get_active_volume(haystack_url)
-            all_volumes = await get_all_volumes(haystack_url)
+            await get_active_volume(haystack_url)
         except RuntimeError as e:
-            log.error("Nelze zjistit seznam svazků: %s", e)
+            log.error("Haystack Node nedostupný: %s", e)
             sys.exit(1)
 
-        to_compact = [v for v in all_volumes if v != active]
-        if not to_compact:
-            log.info("Žádné svazky ke kompakci (aktivní: %d)", active)
-            return
-
-        log.info("Kompaktuji svazky: %s (aktivní %d je vynechán)", to_compact, active)
-        for vid in to_compact:
-            await compact_volume(vid, haystack_url, gateway_url)
+        result = await compact_all(haystack_url, gateway_url)
+        if result.get("status") == "error":
+            sys.exit(1)
 
     elif args.volume_id is not None:
         await compact_volume(args.volume_id, haystack_url, gateway_url)

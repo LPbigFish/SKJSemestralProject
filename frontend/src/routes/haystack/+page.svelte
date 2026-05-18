@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getHealth, listVolumes, compactVolume } from '$lib/haystack-api';
+	import { getHealth, listVolumes, compactVolume, compactAll } from '$lib/haystack-api';
 	import type { VolumeInfo } from '$lib/types';
 
 	let healthy = $state<boolean | null>(null);
@@ -7,7 +7,8 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 	let compactingId = $state<number | null>(null);
-	let compactResult = $state<{ volumeId: number; message: string } | null>(null);
+	let compactingAll = $state(false);
+	let compactResult = $state<{ volumeId: number | string; message: string } | null>(null);
 	let gatewayUrl = $state('');
 	let healthPolling = false;
 	let healthInterval: ReturnType<typeof setInterval> | null = null;
@@ -55,6 +56,23 @@
 			};
 		} finally {
 			compactingId = null;
+		}
+	}
+
+	async function handleCompactAll() {
+		compactingAll = true;
+		compactResult = null;
+		try {
+			await compactAll(gatewayUrl || undefined);
+			compactResult = { volumeId: 'all', message: 'Global compaction completed successfully' };
+			await refreshVolumes();
+		} catch (e) {
+			compactResult = {
+				volumeId: 'all',
+				message: e instanceof Error ? e.message : 'Global compaction failed'
+			};
+		} finally {
+			compactingAll = false;
 		}
 	}
 
@@ -142,26 +160,35 @@
 					<span class="text-sm font-normal text-gray-500">({volumes.length})</span>
 				{/if}
 			</h2>
-			<button
-				onclick={refreshVolumes}
-				disabled={loading}
-				class="flex items-center gap-1 rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50"
-			>
-				<svg
-					class="h-4 w-4 {loading ? 'animate-spin' : ''}"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
+			<div class="flex items-center gap-2">
+				<button
+					onclick={handleCompactAll}
+					disabled={compactingAll || volumes.length <= 1}
+					class="flex items-center gap-1 rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
 				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-					/>
-				</svg>
-				Refresh
-			</button>
+					{compactingAll ? 'Compacting All...' : 'Compact All'}
+				</button>
+				<button
+					onclick={refreshVolumes}
+					disabled={loading}
+					class="flex items-center gap-1 rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+				>
+					<svg
+						class="h-4 w-4 {loading ? 'animate-spin' : ''}"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+						/>
+					</svg>
+					Refresh
+				</button>
+			</div>
 		</div>
 
 		{#if loading && !volumes.length}

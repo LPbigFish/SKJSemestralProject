@@ -29,21 +29,33 @@ async def download_image(
 ) -> bytes:
     url = f"{gateway_url}/files/{file_id}"
     headers = {"X-User-Id": user_id, "X-Internal-Source": "true"}
+    conn_retries = 0
+    max_conn_retries = 5
     for attempt in range(max_retries):
-        async with session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                return await resp.read()
-            if resp.status == 202:
-                log.info(
-                    "File %s still uploading (attempt %d/%d), retrying in %.1fs",
-                    file_id, attempt + 1, max_retries, retry_delay,
+        try:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    return await resp.read()
+                if resp.status == 202:
+                    log.info(
+                        "File %s still uploading (attempt %d/%d), retrying in %.1fs",
+                        file_id, attempt + 1, max_retries, retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                body = await resp.text()
+                raise RuntimeError(
+                    f"Failed to download {file_id}: HTTP {resp.status} {body}"
                 )
-                await asyncio.sleep(retry_delay)
-                continue
-            body = await resp.text()
-            raise RuntimeError(
-                f"Failed to download {file_id}: HTTP {resp.status} {body}"
+        except (OSError, aiohttp.ClientError) as e:
+            conn_retries += 1
+            if conn_retries > max_conn_retries:
+                raise
+            log.warning(
+                "Connection error downloading %s (retry %d/%d): %s",
+                file_id, conn_retries, max_conn_retries, e,
             )
+            await asyncio.sleep(0.5)
     raise RuntimeError(
         f"File {file_id} still uploading after {max_retries} retries"
     )
@@ -56,19 +68,31 @@ async def upload_image(
     user_id: str,
     filename: str,
     data: bytes,
+    max_retries: int = 3,
 ) -> dict:
     url = f"{gateway_url}/files/upload"
     headers = {"X-User-Id": user_id, "X-Internal-Source": "true"}
-    form = aiohttp.FormData()
-    form.add_field("bucket_id", str(bucket_id))
-    form.add_field("file", data, filename=filename, content_type="image/png")
-    async with session.post(url, headers=headers, data=form) as resp:
-        if resp.status not in (200, 201, 202):
-            body = await resp.text()
-            raise RuntimeError(
-                f"Failed to upload processed image: HTTP {resp.status} {body}"
+    for attempt in range(max_retries):
+        try:
+            form = aiohttp.FormData()
+            form.add_field("bucket_id", str(bucket_id))
+            form.add_field("file", data, filename=filename, content_type="image/png")
+            async with session.post(url, headers=headers, data=form) as resp:
+                if resp.status not in (200, 201, 202):
+                    body = await resp.text()
+                    raise RuntimeError(
+                        f"Failed to upload processed image: HTTP {resp.status} {body}"
+                    )
+                return await resp.json()
+        except (OSError, aiohttp.ClientError) as e:
+            if attempt + 1 >= max_retries:
+                raise
+            log.warning(
+                "Connection error uploading %s (retry %d/%d): %s",
+                filename, attempt + 1, max_retries, e,
             )
-        return await resp.json()
+            await asyncio.sleep(0.5)
+    raise RuntimeError(f"Upload of {filename} failed after {max_retries} retries")
 
 
 def process_image(image_bytes: bytes, operation: str, params: dict | None) -> bytes:
@@ -170,20 +194,25 @@ async def handle_job(
                 session, gateway_url, job_id, "failed", error=str(exc)
             )
 
-        await publish_done(
-            ws,
-            {
-                "status": "failed",
-                "original_file_id": file_id,
-                "operation": operation,
-                "bucket_id": bucket_id,
-                "error": str(exc),
-            },
-        )
+        try:
+            await publish_done(
+                ws,
+                {
+                    "status": "failed",
+                    "original_file_id": file_id,
+                    "operation": operation,
+                    "bucket_id": bucket_id,
+                    "error": str(exc),
+                },
+            )
+        except Exception:
+            log.warning("Could not publish failure to image.done for msg_id=%d", message_id)
 
-    finally:
+    try:
         await ws.send(json.dumps({"action": "ack", "message_id": message_id}))
         log.info("Acked message_id=%d", message_id)
+    except Exception:
+        log.warning("Could not ack message_id=%d (connection closed)", message_id)
 
 
 async def worker_loop(broker_uri: str, gateway_url: str):

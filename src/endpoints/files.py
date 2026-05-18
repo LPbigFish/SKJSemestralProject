@@ -370,3 +370,39 @@ def bulk_update_location(body: dict, db: Session = Depends(get_db)):
             record.haystack_size = upd["new_size"]
     db.commit()
     return {"updated": len(updates)}
+
+
+@files_router.post("/internal/purge-deleted/{volume_id}")
+def purge_deleted_records(volume_id: int, db: Session = Depends(get_db)):
+    """
+    Fyzicky odstraní DB záznamy s is_deleted=True pro daný svazek.
+    Volá se po kompakci, která data fyzicky odstranila z .dat souboru.
+    """
+    deleted = (
+        db.query(FileRecord)
+        .filter(
+            FileRecord.volume_id == volume_id,
+            FileRecord.is_deleted == True,
+        )
+        .all()
+    )
+    count = len(deleted)
+    for record in deleted:
+        db.delete(record)
+    db.commit()
+    log.info("Odstraněno %d smazaných záznamů pro svazek %d", count, volume_id)
+    return {"purged": count, "volume_id": volume_id}
+
+
+@files_router.get("/internal/volume/{volume_id}/all-object-ids")
+def get_volume_all_object_ids(volume_id: int, db: Session = Depends(get_db)):
+    """
+    Vrátí ID všech objektů (včetně smazaných) v daném svazku.
+    Používá se pro detekci prázdných svazků po kompakci.
+    """
+    records = (
+        db.query(FileRecord)
+        .filter(FileRecord.volume_id == volume_id)
+        .all()
+    )
+    return {"object_ids": [r.id for r in records], "count": len(records)}

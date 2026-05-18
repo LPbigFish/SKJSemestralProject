@@ -19,3 +19,12 @@ export async function compactVolume(volumeId: number, gatewayUrl?: string): Prom
 	if (!res.ok) throw new Error(`Failed to compact volume: ${res.status}`);
 	return res.json();
 }
+
+export async function compactAll(gatewayUrl?: string): Promise<unknown> {
+	const params = gatewayUrl ? `?gateway_url=${encodeURIComponent(gatewayUrl)}` : '';
+	const res = await fetch(`/haystack/api/compact-all${params}`, {
+		method: 'POST'
+	});
+	if (!res.ok) throw new Error(`Failed to run global compaction: ${res.status}`);
+	return res.json();
+}
